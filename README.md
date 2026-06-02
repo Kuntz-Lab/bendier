@@ -10,11 +10,26 @@ The repository supports:
 - `bendier_solvers`: A standalone static C++ library implementing factor graph optimization methods
 - `bendier`: Python package that bundles solver bindings and plotters under one import
 
-## Build/Install GTSAM
+## Build/Install Dependencies
 
-The Python bindings dynamically load classes from GTSAM, so GTSAM must first be built and installed from source.
+### Install Eigen3
 
-First clone GTSAM and configure the build with CMake:
+Eigen3 is required for numerical linear algebra operations in `bendier` and `gtsam`.
+You likely already have it installed, but if not, you can install with:
+
+```bash
+sudo apt update
+sudo apt install -y libeigen3-dev
+```
+
+We have tested with Eigen3 version: **3.4.0**.
+
+### Build/Install GTSAM
+
+`bendier` dynamically loads classes from GTSAM, so GTSAM must first be built and installed.
+The best way to do this is from source, which allows you to ensure that all required dependencies are properly configured.
+
+First clone GTSAM and create a build directory:
 
 ```bash
 git clone https://github.com/borglab/gtsam.git
@@ -22,8 +37,15 @@ cd gtsam
 git checkout 4.3a1 # Tested GTSAM version
 mkdir build 
 cd build
-cmake ..
 ```
+
+Next configure the build with CMake:
+
+```bash
+cmake .. -DGTSAM_USE_SYSTEM_EIGEN=ON
+```
+
+Use system Eigen for GTSAM (`-DGTSAM_USE_SYSTEM_EIGEN=ON`) so both GTSAM and `bendier` resolve Eigen from the same system installation. This avoids accidentally mixing GTSAM's internal vendored Eigen headers with the system Eigen headers.
 
 At this point, verify that CMake found all required dependencies (e.g., Boost, Eigen, TBB).
 Ensure that there are no critical warnings during configuration.
@@ -51,6 +73,8 @@ Next create and activate a Python virtual environment:
 python3 -m venv .venv
 source .venv/bin/activate
 ```
+
+Note that we have tested with **Python 3.12.3** but expect that other versions should work as well.
 
 Install the python dependencies required for plotting and simulation:
 ```bash

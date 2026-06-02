@@ -44,14 +44,13 @@ target_include_directories(bendier_solvers
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${GTSAM_INCLUDE_DIR}
-    ${EIGEN_INCLUDE_DIR}
 )
 
 set_target_properties(bendier_solvers PROPERTIES
   POSITION_INDEPENDENT_CODE ON
 )
 
-target_link_libraries(bendier_solvers PUBLIC gtsam)
+target_link_libraries(bendier_solvers PUBLIC gtsam Eigen3::Eigen)
 
 install(TARGETS bendier_solvers
   ARCHIVE DESTINATION lib
@@ -86,7 +85,6 @@ if(BENDIER_BUILD_PYTHON)
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/src
       ${GTSAM_INCLUDE_DIR}
-      ${EIGEN_INCLUDE_DIR}
   )
 
   target_link_libraries(_bendier PRIVATE bendier_solvers)
