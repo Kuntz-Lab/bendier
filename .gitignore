@@ -1,0 +1,35 @@
+# Saved factor graph files
+*.pdf
+*.dot
+
+# Editor files
+.vscode/
+
+# Python
+*.pyc
+__pycache__/
+
+# Virtual environment
+.venv/
+venv/
+
+# Build artifacts
+build/
+build_*/
+build-*/
+dist/
+*.egg-info/
+*.so
+*.whl
+
+# Generated simulation outputs
+python/figures/
+python/videos/frames/
+python/videos/*.mp4
+python/videos/*.webm
+python/videos/*.mov
+
+# clangd
+compile_commands.json
+
+setup_log.txt

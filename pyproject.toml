@@ -1,0 +1,20 @@
+[build-system]
+requires = ["scikit-build-core", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build.cmake.define]
+CMAKE_EXPORT_COMPILE_COMMANDS = "ON"
+BENDIER_BUILD_PYTHON = "ON"
+
+[tool.scikit-build]
+build-dir = "build"
+
+[tool.scikit-build.wheel]
+packages = ["python/bendier"]
+
+[project]
+name = "bendier"
+version = "1.0.0"
+description = "Bayesian Estimation of Nonlinear Deformation: Inference for Elastic Robots"
+readme = "README.md"
+requires-python = ">=3.10"
