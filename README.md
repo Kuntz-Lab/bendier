@@ -10,6 +10,23 @@ The repository supports:
 - `bendier_solvers`: A standalone static C++ library implementing factor graph optimization methods
 - `bendier`: Python package that bundles solver bindings and plotters under one import
 
+If you use this code, please cite our RAL paper (see preprint version [here](https://arxiv.org/abs/2601.04493)):
+
+```
+@article{ferguson2026continuum,
+  title   = {Continuum Robot State Estimation with Actuation Uncertainty},
+  author  = {Ferguson, James M. and Kuntz, Alan and Hermans, Tucker},
+  journal = {IEEE Robotics and Automation Letters},
+  volume  = {xx},
+  number  = {x},
+  pages   = {xxx--xxx},
+  year    = {2026},
+  doi     = {xxxxxxxxxxx}
+}
+```
+
+TODO: Add citation metadata once the paper is published.
+
 ## Build/Install Dependencies
 
 ### Install Eigen3
