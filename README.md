@@ -1,4 +1,4 @@
-# `bendier`: Bayesian Estimation of Nonlinear Deformation: Inference for Elastic Robots
+# BENDIER: Bayesian Estimation of Nonlinear Deformation: Inference for Elastic Robots
 
 ## Description
 
@@ -60,7 +60,7 @@ sudo make install
 
 This installs GTSAM headers (needed to *build* `bendier`) in `/usr/local/include` and library files (needed to *run* `bendier`) in `/usr/local/lib`.
 
-## Build/Install `bendier`
+## Build/Install `bendier` python package
 
 First clone this repository:
 ```bash
@@ -88,14 +88,16 @@ pip install . -v
 
 The final output should include `Successfully installed bendier`, meaning that you can now `import bendier` in Python when the virtual environment is active.
 
-## Build C++ only (without pybind)
+## Build C++ library Only
 
 ```bash
 cmake -S . -B build-cpp -DBENDIER_BUILD_PYTHON=OFF
 cmake --build build-cpp -j
+cmake --install build-cpp --prefix build-cpp/install
 ```
 
 This produces a standalone `bendier_solvers` C++ library.
+The last line creates a staged install under `build-cpp/install/` that you can copy or point other projects at.
 
 ## Run Test Scripts
 
@@ -118,9 +120,35 @@ All RAL paper simulations can be run with
 bash run_sims.bash
 ```
 
-You may get an initial error that says something like: `ImportError: libgtsam.so.4: cannot open shared object file: No such file or directory`.
+When the chosen script runs successfully, a PyVista render window will appear showing real-time solution geometries for the selected model.
+Solution metadata is displayed in the upper-right corner, including optimization solve times and related diagnostics.
+
+## Debugging Tips
+
+1. You may get something like: `ImportError: libgtsam.so.4: cannot open shared object file: No such file or directory`.
 This indicates that the GTSAM library installation directory is not visible to the dynamic linker.
 In most cases this can be resolved by running `sudo ldconfig` and then rerunning the script.
 
-When the chosen script runs successfully, a PyVista render window will appear showing real-time solution geometries for the selected model.
-Solution metadata is displayed in the upper-right corner, including optimization solve times and related diagnostics.
+2. If plotting is slow, first check which GPU is actually rendering OpenGL. On Ubuntu this is usually the most useful single command:
+
+```bash
+glxinfo -B
+```
+
+Look for `OpenGL vendor string` and `OpenGL renderer string`:
+- `llvmpipe`, `softpipe`, or `OSMesa` means software rendering.
+- `Intel` means the integrated GPU is active.
+- `NVIDIA` means the discrete NVIDIA GPU is active.
+
+To switch the machine to NVIDIA system-wide (careful!), use PRIME Select and reboot:
+
+```bash
+sudo prime-select nvidia
+sudo reboot
+```
+
+If you do not want to change the whole session, you can run like this to select the GPU on a per-command basis:
+
+```bash
+__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia python -m tests.parallel_robot.test_simple
+```
