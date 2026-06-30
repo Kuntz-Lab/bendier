@@ -11,7 +11,7 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -33,7 +33,6 @@ set(BENDIER_SOLVER_SOURCES
   src/tendon_robot/TendonDiscWrenchFactor.cpp
   src/tendon_robot/TendonRobotModel.cpp
   src/tendon_robot/TendonRobotSolver.cpp
-  src/utils/SolverBase.cpp
   src/utils/WrenchTransforms.cpp
 )
 

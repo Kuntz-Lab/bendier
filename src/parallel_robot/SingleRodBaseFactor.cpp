@@ -2,7 +2,6 @@
 
 using namespace gtsam;
 
-
 SingleRodBaseFactor::SingleRodBaseFactor(
     Key pose_key,
     Key stress_key,
@@ -12,7 +11,6 @@ SingleRodBaseFactor::SingleRodBaseFactor(
     NoiseModelFactorN<gtsam::Pose3, gtsam::Vector6>(model, pose_key, stress_key),
     pose_(pose) 
 {}
-
 
 Vector SingleRodBaseFactor::evaluateError(
     const Pose3& pose,
@@ -26,7 +24,10 @@ Vector SingleRodBaseFactor::evaluateError(
     Matrix6 d_xi_d_delta;
     Vector6 xi = Pose3::Logmap(delta, d_xi_d_delta);
 
-    // Remove the z rotation error, it is free to move
+    // xi(2): rotation about the rod's mounting axis is omitted since the rod
+    // spins freely about its axis so that DOF is unconstrained.
+    // stress(2) = torsional stress (S_z in body frame) is constrained to zero since
+    // the base joint is a bearing that cannot transmit axial torque.
     Vector6 error;
     error << xi(0), xi(1), xi(3), xi(4), xi(5), stress(2);
 

@@ -3,7 +3,6 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
-
 using PlatformWrenchBase = gtsam::NoiseModelFactorN<
     gtsam::Vector6, gtsam::Pose3,
     gtsam::Vector6, gtsam::Pose3,

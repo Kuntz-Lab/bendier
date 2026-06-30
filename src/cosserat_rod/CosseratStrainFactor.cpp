@@ -4,7 +4,6 @@
 
 using namespace gtsam;
 
-
 CosseratStrainFactor::CosseratStrainFactor(
     Key pose_0_key,
     Key pose_1_key,
@@ -23,8 +22,7 @@ CosseratStrainFactor::CosseratStrainFactor(
     K_inv_(K_inv) 
 {}
 
-
-Vector6 get_strain_magnus(
+static Vector6 get_strain_magnus(
     const Vector6& w0,
     const Vector6& w1,
     const double ds,
@@ -87,7 +85,6 @@ Vector6 get_strain_magnus(
 
     return strain;
 }
-
 
 Vector CosseratStrainFactor::evaluateError(
     const Pose3& p0, 

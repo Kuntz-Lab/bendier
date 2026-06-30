@@ -5,7 +5,6 @@
 #include <gtsam/nonlinear/NonlinearFactor.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
-
 class SingleRodBaseFactor: public gtsam::NoiseModelFactorN<gtsam::Pose3, gtsam::Vector6> {
     using gtsam::NoiseModelFactorN<gtsam::Pose3, gtsam::Vector6>::evaluateError;
 
@@ -22,5 +21,6 @@ public:
         gtsam::OptionalMatrixType H1,
         gtsam::OptionalMatrixType H2) const override;
 
+private:
     const gtsam::Pose3 pose_;
 };

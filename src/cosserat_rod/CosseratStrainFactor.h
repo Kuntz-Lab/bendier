@@ -3,7 +3,6 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
-
 using CosseratStrainBase = gtsam::NoiseModelFactorN<gtsam::Pose3, gtsam::Pose3, gtsam::Vector6, gtsam::Vector6>;
 
 class CosseratStrainFactor: public CosseratStrainBase {

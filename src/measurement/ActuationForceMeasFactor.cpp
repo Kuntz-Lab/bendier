@@ -8,8 +8,8 @@ ActuationForceMeasFactor::ActuationForceMeasFactor(
     const SharedNoiseModel& model) 
 :
     f_z_meas_(f_z_meas),
-    NoiseModelFactor1<Vector6>(model, wrench_key) {}
-
+    NoiseModelFactor1<Vector6>(model, wrench_key) 
+{}
 
 Vector ActuationForceMeasFactor::evaluateError(
     const Vector6& wrench, 

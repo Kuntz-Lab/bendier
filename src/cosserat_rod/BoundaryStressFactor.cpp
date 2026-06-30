@@ -4,7 +4,6 @@
 
 using namespace gtsam;
 
-
 BoundaryStressFactor::BoundaryStressFactor(
     Key stress_key,
     Key wrench_key,
@@ -13,8 +12,8 @@ BoundaryStressFactor::BoundaryStressFactor(
     bool is_base)
 :
     is_base_(is_base),
-    BoundaryStressBase(model, stress_key, wrench_key, pose_key) {}
-
+    BoundaryStressBase(model, stress_key, wrench_key, pose_key) 
+{}
 
 Vector BoundaryStressFactor::evaluateError(
     const Vector6& stress, 

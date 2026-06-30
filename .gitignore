@@ -23,11 +23,7 @@ dist/
 *.whl
 
 # Generated simulation outputs
-python/figures/
-python/videos/frames/
-python/videos/*.mp4
-python/videos/*.webm
-python/videos/*.mov
+python/output/
 
 # clangd
 compile_commands.json

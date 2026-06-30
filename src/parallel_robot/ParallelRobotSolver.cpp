@@ -1,83 +1,56 @@
 #include "ParallelRobotSolver.h"
 
 #include <gtsam/linear/NoiseModel.h>
-#include <gtsam/nonlinear/DoglegOptimizer.h>
-#include <gtsam/nonlinear/GaussNewtonOptimizer.h>
+#include <gtsam/nonlinear/PriorFactor.h>
 
 #include "parallel_robot/ParallelRobotModel.h"
 #include "measurement/ActuationForceMeasFactor.h"
 #include "utils/MiscInline.h"
-#include "utils/SolverBase.h"
 
 using namespace gtsam;
 
-
-ParallelRobotSolver::ParallelRobotSolver(const ParallelRobotSolverConfig& config) 
-:
-    SolverBase(config.base)
+ParallelRobotSolver::ParallelRobotSolver(const ParallelRobotSolverConfig& config)
+:   SolverBase<ParallelRobotModel>(config.base)
 {
     SharedDiagonal strain_noise = get_noise_model_rot_pos(
-        config.sigma_strain_rot, config.sigma_strain_pos); 
-    
-    small_wrench_noise_ = get_noise_model_rot_pos(
-        config.sigma_small_moment, config.sigma_small_force); 
-    
-    robot_ = std::make_unique<ParallelRobot>(
-        config.nodes_per_rod, 
+        config.sigma_strain_rot, config.sigma_strain_pos);
+
+    SharedDiagonal small_wrench_noise = get_noise_model_rot_pos(
+        config.sigma_small_moment, config.sigma_small_force);
+
+    model_ = std::make_unique<ParallelRobotModel>(
+        config.nodes_per_rod,
         config.K_inv,
         strain_noise,
-        small_wrench_noise_,
+        small_wrench_noise,
         config.base_end_poses,
         config.tip_end_poses,
         config.sigma_end_pose_pos,
-        config.sigma_end_pose_rot);
-
-    get_initial_values();
+        config.sigma_end_pose_rot,
+        /* sigma_rod_lengths = */ 1e-3); // We overwrite this on each solve, initial value doesn't matter.
 }
 
-
-void ParallelRobotSolver::get_initial_values() {
-    values_ = robot_->get_initial_values();
-}
-
-
-void ParallelRobotSolver::build_graph() {
-    graph_ = robot_->build_graph(rod_lengths_, sigma_rod_lengths_, wrench_);
-
-    // If we have actuation force measurements, use them
-    if (f_meas_) {
-        auto noise = noiseModel::Isotropic::Sigma(1, f_meas_->sigma);
-        for (int i = 0; i < NUM_RODS; i++) {
-            graph_.add(ActuationForceMeasFactor(
-                robot_->rods_[i]->get_wrench_key(0),
-                f_meas_->meas[i],
-                noise));
-        }
-    }
-}
-
-
-void ParallelRobotSolver::extract_solution() {
-    extracted_ = robot_->get_marginals(values_, marginals_);
-    extracted_.rod_lengths_jacobian = robot_->get_rod_lengths_jacobian(marginals_);
-    extracted_.tip_wrench_jacobian = robot_->get_tip_wrench_jacobian(marginals_);
-}
-
-    
-Solution<ParallelRobotMarginals> ParallelRobotSolver::solve(
-    const std::array<double, NUM_RODS>& rod_lengths, 
-    double sigma_rod_lengths,
-    const Vector6Gaussian& wrench,
-    const std::optional<ActuationForceMeas>& f_meas) 
+Solution<ParallelRobotModel::ModelMarginals> ParallelRobotSolver::solve(
+    const std::array<double, NUM_RODS>& rod_lengths,
+    double                              sigma_rod_lengths,
+    const Vector6Gaussian&              wrench,
+    const std::optional<ActuationForceMeas>& f_meas)
 {
-    rod_lengths_ = rod_lengths;
-    sigma_rod_lengths_ = sigma_rod_lengths;
-    wrench_ = wrench;
-    f_meas_ = f_meas;
+    model_->set_rod_lengths(rod_lengths);
+    model_->set_sigma_rod_lengths(sigma_rod_lengths);
 
-    Solution<ParallelRobotMarginals> solution;
-    solution.meta = optimize();
-    solution.marginals = extracted_;
+    NonlinearFactorGraph priors;
+    priors.add(PriorFactor<Vector6>(
+        model_->platform_wrench_key(),
+        wrench.mean,
+        noiseModel::Gaussian::Covariance(wrench.cov)));
 
-    return solution;
+    if (f_meas) {
+        auto noise = noiseModel::Isotropic::Sigma(1, f_meas->sigma);
+        for (int i = 0; i < NUM_RODS; i++)
+            priors.add(ActuationForceMeasFactor(
+                model_->get_rod_wrench_key(i, 0), f_meas->meas[i], noise));
+    }
+
+    return run_solve(std::move(priors));
 }

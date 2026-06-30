@@ -3,7 +3,6 @@
 #include <gtsam/nonlinear/NonlinearFactor.h>
 #include <gtsam/geometry/Pose3.h>
 
-
 using BoundaryStressBase = gtsam::NoiseModelFactorN<gtsam::Vector6, gtsam::Vector6, gtsam::Pose3>;
 
 class BoundaryStressFactor: public BoundaryStressBase {

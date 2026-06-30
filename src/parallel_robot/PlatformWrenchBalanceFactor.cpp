@@ -4,7 +4,6 @@
 
 using namespace gtsam;
 
-
 PlatformWrenchBalanceFactor::PlatformWrenchBalanceFactor(
     Key stress_key_0, Key pose_key_0,
     Key stress_key_1, Key pose_key_1,
@@ -22,7 +21,8 @@ PlatformWrenchBalanceFactor::PlatformWrenchBalanceFactor(
         stress_key_3, pose_key_3,
         stress_key_4, pose_key_4,
         stress_key_5, pose_key_5,
-        platform_wrench_key, platform_pose_key) {}
+        platform_wrench_key, platform_pose_key) 
+{}
 
 Vector PlatformWrenchBalanceFactor::evaluateError(
     const Vector6& stress_0, const Pose3& pose_0,
@@ -72,7 +72,6 @@ Vector PlatformWrenchBalanceFactor::evaluateError(
     if (H14) { 
         *H14 = d_s0_p_d_pp + d_s1_p_d_pp + d_s2_p_d_pp + d_s3_p_d_pp + d_s4_p_d_pp + d_s5_p_d_pp - d_wrench_body_d_platform_pose;
     }
-
 
     return stress_error;
 }

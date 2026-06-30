@@ -2,7 +2,6 @@
 
 using namespace gtsam;
 
-
 Vector6 transform_wrench_adjoint(
     const Vector6& w0,
     const Pose3& p0,
@@ -30,7 +29,6 @@ Vector6 transform_wrench_adjoint(
     
     return w;
 }
-
 
 Vector6 spatial_to_body_wrench(
     const Vector6& spatial, 
@@ -67,7 +65,6 @@ Vector6 spatial_to_body_wrench(
     return body;
 }
 
-
 Vector6 body_to_spatial_wrench(
     const Vector6& body, 
     const Pose3& pose, 
@@ -101,4 +98,3 @@ Vector6 body_to_spatial_wrench(
     
     return spatial;
 }
-

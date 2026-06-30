@@ -4,44 +4,49 @@
 
 #include "ParallelRobotModel.h"
 #include "ParallelRobotSolver.h"
+#include "pybind/BindHelpers.h"
 
 namespace py = pybind11;
 
-
 void bind_parallel_robot(py::module& m) {
     py::class_<ParallelRobotSolverConfig>(m, "ParallelRobotSolverConfig")
-        .def(py::init<>())
-        .def_readwrite("base", &ParallelRobotSolverConfig::base)
-        .def_readwrite("nodes_per_rod", &ParallelRobotSolverConfig::nodes_per_rod)
-        .def_readwrite("K_inv", &ParallelRobotSolverConfig::K_inv)
-        .def_readwrite("sigma_strain_pos", &ParallelRobotSolverConfig::sigma_strain_pos)
-        .def_readwrite("sigma_strain_rot", &ParallelRobotSolverConfig::sigma_strain_rot)
-        .def_readwrite("sigma_small_force", &ParallelRobotSolverConfig::sigma_small_force)
-        .def_readwrite("sigma_small_moment", &ParallelRobotSolverConfig::sigma_small_moment)
-        .def_readwrite("base_end_poses", &ParallelRobotSolverConfig::base_end_poses)
-        .def_readwrite("tip_end_poses", &ParallelRobotSolverConfig::tip_end_poses)
-        .def_readwrite("sigma_end_pose_pos", &ParallelRobotSolverConfig::sigma_end_pose_pos)
-        .def_readwrite("sigma_end_pose_rot", &ParallelRobotSolverConfig::sigma_end_pose_rot);
+        .def(py::init<
+                int,
+                const gtsam::Matrix6&,
+                double, double,
+                double, double,
+                const std::array<gtsam::Matrix4, NUM_RODS>&,
+                const std::array<gtsam::Matrix4, NUM_RODS>&,
+                double, double,
+                const SolverBaseConfig&>(),
+            py::arg("nodes_per_rod"),
+            py::arg("K_inv"),
+            py::arg("sigma_strain_rot"),
+            py::arg("sigma_strain_pos"),
+            py::arg("sigma_small_force"),
+            py::arg("sigma_small_moment"),
+            py::arg("base_end_poses"),
+            py::arg("tip_end_poses"),
+            py::arg("sigma_end_pose_pos"),
+            py::arg("sigma_end_pose_rot"),
+            py::arg("base") = SolverBaseConfig{});
     
     py::class_<ParallelRobotMarginals>(m, "ParallelRobotMarginals")
         .def(py::init<>())
-        .def_readwrite("rods", &ParallelRobotMarginals::rods)
-        .def_readwrite("platform_pose", &ParallelRobotMarginals::platform_pose)
-        .def_readwrite("platform_wrench", &ParallelRobotMarginals::platform_wrench)
-        .def_readwrite("rod_lengths_jacobian", &ParallelRobotMarginals::rod_lengths_jacobian)
-        .def_readwrite("tip_wrench_jacobian", &ParallelRobotMarginals::tip_wrench_jacobian);
+        .BIND_FIELD(ParallelRobotMarginals, rods)
+        .BIND_FIELD(ParallelRobotMarginals, platform_pose)
+        .BIND_FIELD(ParallelRobotMarginals, platform_wrench)
+        .BIND_FIELD(ParallelRobotMarginals, rod_lengths_jacobian)
+        .BIND_FIELD(ParallelRobotMarginals, tip_wrench_jacobian);
         
-    py::class_<Solution<ParallelRobotMarginals>>(m, "ParallelRobotSolution")
-        .def(py::init<>())
-        .def_readwrite("meta", &Solution<ParallelRobotMarginals>::meta)
-        .def_readwrite("marginals", &Solution<ParallelRobotMarginals>::marginals);
+    bind_solution<ParallelRobotMarginals>(m, "ParallelRobotSolution");
 
     py::class_<ActuationForceMeas>(m, "ActuationForceMeas")
         .def(py::init<>())
         .def(py::init<const gtsam::Vector6&, double>(),
             py::arg("meas"), py::arg("sigma"))
-        .def_readwrite("f_meas", &ActuationForceMeas::meas)
-        .def_readwrite("cov", &ActuationForceMeas::sigma);
+        .BIND_FIELD(ActuationForceMeas, meas)
+        .BIND_FIELD(ActuationForceMeas, sigma);
 
     py::class_<ParallelRobotSolver>(m, "ParallelRobotSolver")
         .def(py::init<const ParallelRobotSolverConfig&>(), py::arg("config"))
@@ -49,6 +54,6 @@ void bind_parallel_robot(py::module& m) {
             py::arg("rod_lengths"),
             py::arg("sigma_rod_lengths"),
             py::arg("wrench"),
-            py::arg("f_meas"),
+            py::arg("f_meas") = py::none(),
             py::call_guard<py::gil_scoped_release>());
 }
