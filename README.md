@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo.png" width="800" alt="BENDIER logo">
+  <img src="images/logo.png" width="600" alt="BENDIER logo">
 </p>
 
 <h3 align="center">Bayesian Estimation of Nonlinear Deformation: Inference for Elastic Robots</h3>
