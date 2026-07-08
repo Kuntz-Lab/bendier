@@ -1,9 +1,13 @@
+import itertools
+
 import pyvista as pv
 import vtk
 import numpy as np
 
 from . import utils
 from .cosserat_rod_plotter import CosseratRodMeshManager
+
+ROD_COLORS = ['rebeccapurple', 'deepcadmiumred', 'cadmiumorange', 'lightcadmiumyellow', 'seagreen', 'royalblue']
 
 
 class ParallelRobotPlotter:
@@ -18,34 +22,42 @@ class ParallelRobotPlotter:
 
         self.plotter = utils.PlotterBase(**kwargs)
 
-        self.rod_managers = []
+        self.rod_managers = None
 
         self.moment_scale = 0.2
         self.force_scale = 0.3
         self.platform_z_offset = platform_z_offset
         self.plot_tip_force = plot_tip_force
-
-        rod_colors = ['rebeccapurple', 'deepcadmiumred', 'cadmiumorange', 'lightcadmiumyellow', 'seagreen', 'royalblue']
-        for i in range(6):
-            self.rod_managers.append(CosseratRodMeshManager(
-                plot_base_plate=False,
-                plot_wrenches=plot_rod_wrenches,
-                plot_base_wrench=plot_base_wrenches,
-                plot_backbone_frames=plot_backbone_frames,
-                plot_backbone_ellipsoids=plot_backbone_ellipsoids,
-                backbone_radius=0.005,
-                moment_scale=self.moment_scale, 
-                force_scale=self.force_scale, 
-                cartesian_frame_scale=0.025,
-                rod_opacity=0.5,
-                rod_color=rod_colors[i]
-                )
-            )
+        self._plot_rod_wrenches = plot_rod_wrenches
+        self._plot_base_wrenches = plot_base_wrenches
+        self._plot_backbone_frames = plot_backbone_frames
+        self._plot_backbone_ellipsoids = plot_backbone_ellipsoids
 
         base_plate = pv.Cylinder(direction=(0,0,1), radius=0.2, height=0.02)
         self.plotter.plotter.add_mesh(base_plate, color="silver", show_edges=True, line_width=2, opacity=0.3)
-        
-  
+
+    def _ensure_rod_managers(self, num_rods):
+        if self.rod_managers is not None:
+            return
+
+        self.rod_managers = []
+        colors = itertools.cycle(ROD_COLORS)
+        for _ in range(num_rods):
+            self.rod_managers.append(CosseratRodMeshManager(
+                plot_base_plate=False,
+                plot_wrenches=self._plot_rod_wrenches,
+                plot_base_wrench=self._plot_base_wrenches,
+                plot_backbone_frames=self._plot_backbone_frames,
+                plot_backbone_ellipsoids=self._plot_backbone_ellipsoids,
+                backbone_radius=0.005,
+                moment_scale=self.moment_scale,
+                force_scale=self.force_scale,
+                cartesian_frame_scale=0.025,
+                rod_opacity=0.5,
+                rod_color=next(colors)
+                )
+            )
+
     def update_platform(self, solution, plotter):
 
         if plotter.frame == 0:
@@ -122,6 +134,7 @@ class ParallelRobotPlotter:
             self.tip_force_gt_transform.SetMatrix(matrix.flatten().tolist())
 
     def update(self, solution, tip_force_gt=None):
+        self._ensure_rod_managers(len(solution.marginals.rods))
         for i, manager in enumerate(self.rod_managers):
             manager.update(solution.marginals.rods[i], self.plotter)
 

@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import chi2
 
-from bendier import TendonRobotSolver, Vector6Gaussian, Vector4Gaussian, Vector3Gaussian
+from bendier import TendonRobotSolver, Vector6Gaussian, VectorXGaussian, Vector3Gaussian
 
 from bendier.plotting.tendon_robot_plotter import TendonRobotPlotter
 from bendier.plotting.utils import setup_plt
@@ -40,7 +40,7 @@ def run_sim(params):
         q_gt = q_mean + q_noise_model.step(params.q_meas_cov)
 
         solution_sim = simulator.solve(
-            Vector4Gaussian(q_gt, params.small_q_cov),
+            VectorXGaussian(q_gt, params.small_q_cov),
             Vector6Gaussian(np.hstack((np.zeros(3), f_gt)), params.small_wrench_cov),
             None
         )
@@ -51,7 +51,7 @@ def run_sim(params):
 
         # Use the sampled position as a prior on tip pose
         solution_post = solver.solve(
-            Vector4Gaussian(q_mean, params.q_meas_cov),
+            VectorXGaussian(q_mean, params.q_meas_cov),
             Vector6Gaussian(np.zeros(6), params.wrench_prior_cov),
             Vector3Gaussian(p_meas, params.p_meas_cov)
         )

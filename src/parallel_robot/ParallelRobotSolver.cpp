@@ -31,7 +31,7 @@ ParallelRobotSolver::ParallelRobotSolver(const ParallelRobotSolverConfig& config
 }
 
 Solution<ParallelRobotModel::ModelMarginals> ParallelRobotSolver::solve(
-    const std::array<double, NUM_RODS>& rod_lengths,
+    const Vector&                        rod_lengths,
     double                              sigma_rod_lengths,
     const Vector6Gaussian&              wrench,
     const std::optional<ActuationForceMeas>& f_meas)
@@ -47,7 +47,9 @@ Solution<ParallelRobotModel::ModelMarginals> ParallelRobotSolver::solve(
 
     if (f_meas) {
         auto noise = noiseModel::Isotropic::Sigma(1, f_meas->sigma);
-        for (int i = 0; i < NUM_RODS; i++)
+        for (int i = 0; i < model_->get_num_rods(); i++)
+            // We are using the world frame wrench here, but in a realistic scenario, the measured wrench would be in the rod frame.
+            // We could add a wrench rotation into the measurement model inside the factor if we wanted to do that. Fine for now.
             priors.add(ActuationForceMeasFactor(
                 model_->get_rod_wrench_key(i, 0), f_meas->meas[i], noise));
     }

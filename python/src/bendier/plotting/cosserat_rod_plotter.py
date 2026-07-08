@@ -134,6 +134,7 @@ class CosseratRodMeshManager:
             return 
 
         states = solution.states if self.plot_base_wrench else solution.states[1:]
+        states = [s for s in states if s.wrench is not None]
 
         if plotter.frame == 0:
             self.moment_arrow_transforms = []

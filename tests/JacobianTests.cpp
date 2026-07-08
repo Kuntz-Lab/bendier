@@ -36,13 +36,20 @@ Matrix6 K_inv_1() {
 }
 
 // Tendon routing holes evenly spaced around a disc of the given radius
-std::array<Point3, NUM_TENDONS> holes_at(double radius, double angle_offset) {
-  std::array<Point3, NUM_TENDONS> holes;
-  for (int i = 0; i < NUM_TENDONS; ++i) {
-    double angle = angle_offset + i * (2.0 * M_PI / NUM_TENDONS);
+std::vector<Point3> holes_at(double radius, double angle_offset, int num_tendons) {
+  std::vector<Point3> holes(num_tendons);
+  for (int i = 0; i < num_tendons; ++i) {
+    double angle = angle_offset + i * (2.0 * M_PI / num_tendons);
     holes[i] = Point3(radius * std::cos(angle), radius * std::sin(angle), 0.0);
   }
   return holes;
+}
+
+Vector tensions_of(std::initializer_list<double> vals) {
+  Vector t(vals.size());
+  int i = 0;
+  for (double v : vals) t[i++] = v;
+  return t;
 }
 
 }
@@ -95,7 +102,6 @@ TEST(WrenchTransforms, spatial_to_body_wrench_jacobians) {
   EXPECT(assert_equal(spatial, roundtrip, 1e-9));
 }
 
-/* ************************************************************************* */
 TEST(WrenchTransforms, body_to_spatial_wrench_jacobians) {
   Vector6 body = wrench_2();
   Pose3 pose = pose_b();
@@ -127,7 +133,7 @@ TEST(CosseratStrainFactor, jacobians_all_magnus_terms) {
     for (int num_magnus_terms = 1; num_magnus_terms <= 4; ++num_magnus_terms) {
       CosseratStrainFactor factor(
           p0k, p1k, s0k, s1k,
-          ds, DefaultNominalStrain(), K_inv_1(),
+          ds, StraightRodNominalStrain(), K_inv_1(),
           noiseModel::Unit::Create(6), num_magnus_terms);
 
       EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
@@ -190,14 +196,11 @@ TEST(SingleRodBaseFactor, jacobians) {
 }
 
 TEST(PlatformWrenchBalanceFactor, jacobians) {
-  Key s[6] = {1, 2, 3, 4, 5, 6};
-  Key p[6] = {11, 12, 13, 14, 15, 16};
+  KeyVector s = {1, 2, 3, 4, 5, 6};
+  KeyVector p = {11, 12, 13, 14, 15, 16};
   Key pwk = 20, ppk = 21;
 
-  PlatformWrenchBalanceFactor factor(
-      s[0], p[0], s[1], p[1], s[2], p[2],
-      s[3], p[3], s[4], p[4], s[5], p[5],
-      pwk, ppk, noiseModel::Unit::Create(6));
+  PlatformWrenchBalanceFactor factor(s, p, pwk, ppk, noiseModel::Unit::Create(6));
 
   Values values;
   Pose3 rod_poses[6] = {pose_a(), pose_b(), pose_c(), pose_a(), pose_b(), pose_c()};
@@ -213,28 +216,46 @@ TEST(PlatformWrenchBalanceFactor, jacobians) {
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
 }
 
+TEST(PlatformWrenchBalanceFactor, jacobians_four_rods) {
+  KeyVector s = {1, 2, 3, 4};
+  KeyVector p = {11, 12, 13, 14};
+  Key pwk = 20, ppk = 21;
+
+  PlatformWrenchBalanceFactor factor(s, p, pwk, ppk, noiseModel::Unit::Create(6));
+
+  Values values;
+  Pose3 rod_poses[4] = {pose_a(), pose_b(), pose_c(), pose_a()};
+  Vector6 rod_stresses[4] = {wrench_1(), wrench_2(), wrench_1(), wrench_2()};
+  for (int i = 0; i < 4; ++i) {
+    values.insert(s[i], rod_stresses[i]);
+    values.insert(p[i], rod_poses[i]);
+  }
+  values.insert(pwk, wrench_1());
+  values.insert(ppk, pose_a());
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
 TEST(TendonDiscWrenchFactor, jacobians_interior) {
   Key pose_prev_k = 1, pose_k = 2, pose_next_k = 3;
   Key wrench_k = 4, tensions_k = 5, ext_wrench_k = 6;
 
-  auto holes_prev = holes_at(0.005, 0.0);
-  auto holes = holes_at(0.005, 0.2);
-  auto holes_next = holes_at(0.005, 0.4);
+  auto holes_prev = holes_at(0.005, 0.0, 4);
+  auto holes = holes_at(0.005, 0.2, 4);
+  auto holes_next = holes_at(0.005, 0.4, 4);
 
   TendonDiscWrenchFactor factor(
-      pose_prev_k, pose_k, pose_next_k,
-      wrench_k, tensions_k, ext_wrench_k,
+      pose_prev_k, pose_k, std::optional<Key>(pose_next_k),
+      wrench_k, tensions_k, std::optional<Key>(ext_wrench_k),
       holes_prev, holes, holes_next,
       noiseModel::Unit::Create(6));
-
-  Vector4 tensions; tensions << 2.0, 1.5, 0.5, 3.0;
 
   Values values;
   values.insert(pose_prev_k, pose_a());
   values.insert(pose_k, pose_b());
   values.insert(pose_next_k, pose_c());
   values.insert(wrench_k, wrench_2());
-  values.insert(tensions_k, tensions);
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5, 3.0}));
   values.insert(ext_wrench_k, wrench_1());
 
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
@@ -244,22 +265,91 @@ TEST(TendonDiscWrenchFactor, jacobians_tip) {
   Key pose_prev_k = 1, pose_k = 2;
   Key wrench_k = 3, tensions_k = 4, ext_wrench_k = 5;
 
-  auto holes_prev = holes_at(0.005, 0.0);
-  auto holes = holes_at(0.005, 0.2);
+  auto holes_prev = holes_at(0.005, 0.0, 4);
+  auto holes = holes_at(0.005, 0.2, 4);
 
   TendonDiscWrenchFactor factor(
-      pose_prev_k, pose_k,
-      wrench_k, tensions_k, ext_wrench_k,
-      holes_prev, holes,
+      pose_prev_k, pose_k, std::nullopt,
+      wrench_k, tensions_k, std::optional<Key>(ext_wrench_k),
+      holes_prev, holes, {},
       noiseModel::Unit::Create(6));
-
-  Vector4 tensions; tensions << 2.0, 1.5, 0.5, 3.0;
 
   Values values;
   values.insert(pose_prev_k, pose_a());
   values.insert(pose_k, pose_b());
   values.insert(wrench_k, wrench_2());
-  values.insert(tensions_k, tensions);
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5, 3.0}));
+  values.insert(ext_wrench_k, wrench_1());
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(TendonDiscWrenchFactor, jacobians_interior_no_external_wrench) {
+  Key pose_prev_k = 1, pose_k = 2, pose_next_k = 3;
+  Key wrench_k = 4, tensions_k = 5;
+
+  auto holes_prev = holes_at(0.005, 0.0, 4);
+  auto holes = holes_at(0.005, 0.2, 4);
+  auto holes_next = holes_at(0.005, 0.4, 4);
+
+  TendonDiscWrenchFactor factor(
+      pose_prev_k, pose_k, std::optional<Key>(pose_next_k),
+      wrench_k, tensions_k, std::nullopt,
+      holes_prev, holes, holes_next,
+      noiseModel::Unit::Create(6));
+
+  Values values;
+  values.insert(pose_prev_k, pose_a());
+  values.insert(pose_k, pose_b());
+  values.insert(pose_next_k, pose_c());
+  values.insert(wrench_k, wrench_2());
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5, 3.0}));
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(TendonDiscWrenchFactor, jacobians_tip_no_external_wrench) {
+  Key pose_prev_k = 1, pose_k = 2;
+  Key wrench_k = 3, tensions_k = 4;
+
+  auto holes_prev = holes_at(0.005, 0.0, 4);
+  auto holes = holes_at(0.005, 0.2, 4);
+
+  TendonDiscWrenchFactor factor(
+      pose_prev_k, pose_k, std::nullopt,
+      wrench_k, tensions_k, std::nullopt,
+      holes_prev, holes, {},
+      noiseModel::Unit::Create(6));
+
+  Values values;
+  values.insert(pose_prev_k, pose_a());
+  values.insert(pose_k, pose_b());
+  values.insert(wrench_k, wrench_2());
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5, 3.0}));
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(TendonDiscWrenchFactor, jacobians_interior_three_tendons) {
+  Key pose_prev_k = 1, pose_k = 2, pose_next_k = 3;
+  Key wrench_k = 4, tensions_k = 5, ext_wrench_k = 6;
+
+  auto holes_prev = holes_at(0.005, 0.0, 3);
+  auto holes = holes_at(0.005, 0.2, 3);
+  auto holes_next = holes_at(0.005, 0.4, 3);
+
+  TendonDiscWrenchFactor factor(
+      pose_prev_k, pose_k, std::optional<Key>(pose_next_k),
+      wrench_k, tensions_k, std::optional<Key>(ext_wrench_k),
+      holes_prev, holes, holes_next,
+      noiseModel::Unit::Create(6));
+
+  Values values;
+  values.insert(pose_prev_k, pose_a());
+  values.insert(pose_k, pose_b());
+  values.insert(pose_next_k, pose_c());
+  values.insert(wrench_k, wrench_2());
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5}));
   values.insert(ext_wrench_k, wrench_1());
 
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);

@@ -3,32 +3,23 @@
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
 
+#include <optional>
+#include <vector>
+
 #include "tendon_robot/TendonRobotModel.h"
 
 class TendonDiscWrenchFactor : public gtsam::NoiseModelFactor {
 public:
-    // Non-tip disc: 6 keys
     TendonDiscWrenchFactor(
         gtsam::Key pose_prev_key,
         gtsam::Key pose_key,
-        gtsam::Key pose_next_key,
+        std::optional<gtsam::Key> pose_next_key,
         gtsam::Key wrench_key,
         gtsam::Key tensions_key,
-        gtsam::Key external_wrench_key,
-        const std::array<gtsam::Point3, NUM_TENDONS>& holes_prev,
-        const std::array<gtsam::Point3, NUM_TENDONS>& holes,
-        const std::array<gtsam::Point3, NUM_TENDONS>& holes_next,
-        const gtsam::SharedNoiseModel& model);
-
-    // Tip disc: 5 keys
-    TendonDiscWrenchFactor(
-        gtsam::Key pose_prev_key,
-        gtsam::Key pose_key,
-        gtsam::Key wrench_key,
-        gtsam::Key tensions_key,
-        gtsam::Key external_wrench_key,
-        const std::array<gtsam::Point3, NUM_TENDONS>& holes_prev,
-        const std::array<gtsam::Point3, NUM_TENDONS>& holes,
+        std::optional<gtsam::Key> external_wrench_key,
+        const std::vector<gtsam::Point3>& holes_prev,
+        const std::vector<gtsam::Point3>& holes,
+        const std::vector<gtsam::Point3>& holes_next,
         const gtsam::SharedNoiseModel& model);
 
     gtsam::Vector unwhitenedError(
@@ -47,7 +38,8 @@ private:
         gtsam::OptionalJacobian<6, 6> H_pose_other = {}) const;
 
     bool is_tip_;
-    std::array<gtsam::Point3, NUM_TENDONS> holes_prev_;
-    std::array<gtsam::Point3, NUM_TENDONS> holes_;
-    std::array<gtsam::Point3, NUM_TENDONS> holes_next_;  // unused when is_tip_
+    bool has_external_wrench_;
+    std::vector<gtsam::Point3> holes_prev_;
+    std::vector<gtsam::Point3> holes_;
+    std::vector<gtsam::Point3> holes_next_;  // unused when is_tip_
 };

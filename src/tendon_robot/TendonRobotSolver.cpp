@@ -23,6 +23,9 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
     SharedDiagonal base_pose_noise = get_noise_model_rot_pos(
         config.sigma_base_pose_rot, config.sigma_base_pose_pos);
 
+    int num_nodes = TendonRobotNumNodes(config.num_discs, config.num_between_nodes);
+    
+    // Only base and tip are true external wrench nodes for this solver
     model_ = std::make_unique<TendonRobotModel>(
         config.rod_length,
         config.num_discs,
@@ -32,24 +35,22 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
         strain_noise,
         small_wrench_noise_,
         base_pose_mean,
-        base_pose_noise);
+        base_pose_noise,
+        std::vector<int>{0, num_nodes - 1});  
 }
 
 Solution<TendonRobotModel::ModelMarginals> TendonRobotSolver::solve(
-    const Vector4Gaussian&                tensions,
+    const VectorXGaussian&                tensions,
     const std::optional<Vector6Gaussian>& tip_wrench,
     const std::optional<Vector3Gaussian>& tip_position_meas)
 {
     NonlinearFactorGraph priors;
-    priors.add(PriorFactor<Vector4>(
+    priors.add(PriorFactor<Vector>(
         model_->get_tensions_key(),
         tensions.mean,
         noiseModel::Gaussian::Covariance(tensions.cov)));
 
     int num_nodes = model_->get_num_nodes();
-    for (int i = 1; i + 1 < num_nodes; ++i)
-        priors.add(PriorFactor<Vector6>(
-            model_->get_external_wrench_key(i), Vector6::Zero(), small_wrench_noise_));
 
     Vector6          tip_wrench_mean  = Vector6::Zero();
     SharedNoiseModel tip_wrench_noise = small_wrench_noise_;
@@ -58,7 +59,7 @@ Solution<TendonRobotModel::ModelMarginals> TendonRobotSolver::solve(
         tip_wrench_noise = noiseModel::Gaussian::Covariance(tip_wrench->cov);
     }
     priors.add(PriorFactor<Vector6>(
-        model_->get_external_wrench_key(num_nodes - 1), tip_wrench_mean, tip_wrench_noise));
+        *model_->get_external_wrench_key(num_nodes - 1), tip_wrench_mean, tip_wrench_noise));
 
     if (tip_position_meas)
         priors.add(PositionPriorFactor(

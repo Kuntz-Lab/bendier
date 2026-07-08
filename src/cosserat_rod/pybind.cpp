@@ -25,15 +25,14 @@ void bind_cosserat_rod(py::module& m) {
         .def(py::init<
                 double,
                 int,
-                int,
                 const gtsam::Matrix6&,
                 double, double,
                 double, double,
                 double, double,
+                int,
                 const SolverBaseConfig&>(),
             py::arg("rod_length"),
             py::arg("num_nodes"),
-            py::arg("num_magnus_terms"),
             py::arg("K_inv"),
             py::arg("sigma_strain_rot"),
             py::arg("sigma_strain_pos"),
@@ -41,6 +40,7 @@ void bind_cosserat_rod(py::module& m) {
             py::arg("sigma_small_moment"),
             py::arg("sigma_base_pose_pos"),
             py::arg("sigma_base_pose_rot"),
+            py::arg("num_magnus_terms") = 4,
             py::arg("base") = SolverBaseConfig{});
 
     py::class_<CosseratRodSolver>(m, "CosseratRodSolver")

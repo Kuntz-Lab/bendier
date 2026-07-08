@@ -4,10 +4,14 @@
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/base/Matrix.h>
 
+#include <optional>
+
 #include "cosserat_rod/CosseratRodModel.h"
 #include "utils/Gaussians.h"
 
-constexpr int NUM_TENDONS = 4;
+inline int TendonRobotNumNodes(int num_discs, int num_between_nodes) {
+    return num_discs + (num_discs - 1) * num_between_nodes;
+}
 
 enum class RoutingAngleFunction {
     CONSTANT = 0,
@@ -20,28 +24,28 @@ struct RoutingFunctionParams {
 };
 
 struct TendonInput {
-    std::array<RoutingAngleFunction, NUM_TENDONS> functions;
-    std::array<RoutingFunctionParams, NUM_TENDONS> params;
+    std::vector<RoutingAngleFunction> functions;
+    std::vector<RoutingFunctionParams> params;
     double routing_radius;
 };
 
 struct TendonConfig {
     int num_discs;
-    int num_tendons = NUM_TENDONS;
+    int num_tendons;
     double routing_radius;
     std::vector<int> disc_pose_idx;
     std::vector<int> no_disc_pose_idx;
-    std::vector<std::array<gtsam::Vector3, NUM_TENDONS>> hole_locations;
+    std::vector<std::vector<gtsam::Vector3>> hole_locations;  // [disc][tendon]
 };
 
 struct TendonRobotMarginals {
     CosseratRodMarginals rod;
     TendonConfig tendon_config;
 
-    std::vector<Vector6Gaussian> external_wrenches;
-    Vector4Gaussian tensions;
+    std::vector<std::optional<Vector6Gaussian>> external_wrenches;
+    VectorXGaussian tensions;
 
-    Eigen::Matrix<double, 6, NUM_TENDONS> J_pose_tensions;
+    gtsam::Matrix J_pose_tensions;  // 6 x num_tendons
 };
 
 class TendonRobotModel {
@@ -56,13 +60,14 @@ public:
         gtsam::SharedDiagonal strain_noise,
         gtsam::SharedDiagonal stress_noise,
         gtsam::Pose3 base_pose_mean,
-        gtsam::SharedDiagonal base_pose_noise);
+        gtsam::SharedDiagonal base_pose_noise,
+        const std::vector<int>& external_wrench_node_indices);  // Nodes that have a true external wrench variable
 
     gtsam::Values get_initial_values() const;
 
     gtsam::NonlinearFactorGraph build_graph() const;
 
-    gtsam::Key get_external_wrench_key(int node_idx) const;
+    std::optional<gtsam::Key> get_external_wrench_key(int node_idx) const;
 
     gtsam::Key get_tensions_key() const;
 
@@ -71,6 +76,8 @@ public:
     gtsam::Key get_pose_key(int node_idx) const;
 
     inline int get_num_nodes() const { return num_nodes_; }
+
+    inline int get_num_tendons() const { return num_tendons_; }
 
     TendonRobotMarginals get_marginals(
         const gtsam::Values& values,
@@ -86,6 +93,7 @@ private:
     const double rod_length_;
     const int num_discs_;
     const int num_nodes_;
+    const int num_tendons_;
 
     gtsam::SharedDiagonal stress_noise_;
 
@@ -93,4 +101,6 @@ private:
     gtsam::SharedDiagonal base_pose_noise_;
 
     TendonConfig tendon_config_;
+
+    std::vector<bool> is_external_wrench_node_;
 };

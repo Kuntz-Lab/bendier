@@ -11,7 +11,6 @@ struct CosseratRodSolverConfig {
     CosseratRodSolverConfig(
         double rod_length,
         int num_nodes,
-        int num_magnus_terms,
         const gtsam::Matrix6& K_inv,
         double sigma_strain_rot,
         double sigma_strain_pos,
@@ -19,6 +18,7 @@ struct CosseratRodSolverConfig {
         double sigma_small_moment,
         double sigma_base_pose_pos,
         double sigma_base_pose_rot,
+        int num_magnus_terms = 4,
         const SolverBaseConfig& base = {})
     :   base(base),
         rod_length(rod_length),

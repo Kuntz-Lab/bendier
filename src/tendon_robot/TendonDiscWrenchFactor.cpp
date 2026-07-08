@@ -6,60 +6,64 @@
 
 using namespace gtsam;
 
-TendonDiscWrenchFactor::TendonDiscWrenchFactor(
-    Key pose_prev_key, Key pose_key, Key pose_next_key,
-    Key wrench_key, Key tensions_key, Key external_wrench_key,
-    const std::array<Point3, NUM_TENDONS>& holes_prev,
-    const std::array<Point3, NUM_TENDONS>& holes,
-    const std::array<Point3, NUM_TENDONS>& holes_next,
-    const SharedNoiseModel& model)
-:
-    NoiseModelFactor(model, KeyVector{pose_prev_key, pose_key, pose_next_key,
-                                     wrench_key, tensions_key, external_wrench_key}),
-    is_tip_(false),
-    holes_prev_(holes_prev),
-    holes_(holes),
-    holes_next_(holes_next) 
-{}
+namespace {
+
+KeyVector make_keys(
+    Key pose_prev_key, Key pose_key, std::optional<Key> pose_next_key,
+    Key wrench_key, Key tensions_key,
+    std::optional<Key> external_wrench_key)
+{
+    KeyVector keys{pose_prev_key, pose_key};
+    if (pose_next_key) keys.push_back(*pose_next_key);
+    keys.push_back(wrench_key);
+    keys.push_back(tensions_key);
+    if (external_wrench_key) keys.push_back(*external_wrench_key);
+    return keys;
+}
+
+}  // namespace
 
 TendonDiscWrenchFactor::TendonDiscWrenchFactor(
-    Key pose_prev_key, Key pose_key,
-    Key wrench_key, Key tensions_key, Key external_wrench_key,
-    const std::array<Point3, NUM_TENDONS>& holes_prev,
-    const std::array<Point3, NUM_TENDONS>& holes,
+    Key pose_prev_key, Key pose_key, std::optional<Key> pose_next_key,
+    Key wrench_key, Key tensions_key,
+    std::optional<Key> external_wrench_key,
+    const std::vector<Point3>& holes_prev,
+    const std::vector<Point3>& holes,
+    const std::vector<Point3>& holes_next,
     const SharedNoiseModel& model)
 :
-    NoiseModelFactor(model, KeyVector{pose_prev_key, pose_key,
-                                     wrench_key, tensions_key, external_wrench_key}),
-    is_tip_(true),
+    NoiseModelFactor(model, make_keys(
+        pose_prev_key, pose_key, pose_next_key, wrench_key, tensions_key, external_wrench_key)),
+    is_tip_(!pose_next_key.has_value()),
+    has_external_wrench_(external_wrench_key.has_value()),
     holes_prev_(holes_prev),
     holes_(holes),
-    holes_next_({}) 
+    holes_next_(is_tip_ ? std::vector<Point3>{} : holes_next)
 {}
-
 
 Vector TendonDiscWrenchFactor::unwhitenedError(
     const Values& x, OptionalMatrixVecType H) const
 {
     // Key layout:
-    //   Non-tip: [0]=pose_prev, [1]=pose, [2]=pose_next, [3]=wrench, [4]=tensions, [5]=ext_wrench
-    //   Tip:     [0]=pose_prev, [1]=pose,                [2]=wrench, [3]=tensions, [4]=ext_wrench
+    //   Non-tip, with ext: [0]=pose_prev, [1]=pose, [2]=pose_next, [3]=wrench, [4]=tensions, [5]=ext_wrench
+    //   Non-tip, no ext:   [0]=pose_prev, [1]=pose, [2]=pose_next, [3]=wrench, [4]=tensions
+    //   Tip, with ext:     [0]=pose_prev, [1]=pose,                [2]=wrench, [3]=tensions, [4]=ext_wrench
+    //   Tip, no ext:       [0]=pose_prev, [1]=pose,                [2]=wrench, [3]=tensions
     const int wrench_idx     = is_tip_ ? 2 : 3;
-    const int tensions_idx   = is_tip_ ? 3 : 4;
-    const int ext_wrench_idx = is_tip_ ? 4 : 5;
+    const int tensions_idx   = wrench_idx + 1;
+    const int ext_wrench_idx = tensions_idx + 1;  // only valid when has_external_wrench_
 
-    const Pose3   pose_prev       = x.at<Pose3>(keys()[0]);
-    const Pose3   pose            = x.at<Pose3>(keys()[1]);
-    const Pose3   pose_next       = is_tip_ ? Pose3{} : x.at<Pose3>(keys()[2]);
-    const Vector6 wrench          = x.at<Vector6>(keys()[wrench_idx]);
-    const Vector4 tensions        = x.at<Vector4>(keys()[tensions_idx]);
-    const Vector6 wrench_external = x.at<Vector6>(keys()[ext_wrench_idx]);
+    const Pose3   pose_prev = x.at<Pose3>(keys()[0]);
+    const Pose3   pose      = x.at<Pose3>(keys()[1]);
+    const Pose3   pose_next = is_tip_ ? Pose3{} : x.at<Pose3>(keys()[2]);
+    const Vector6 wrench    = x.at<Vector6>(keys()[wrench_idx]);
+    const Vector  tensions  = x.at<Vector>(keys()[tensions_idx]);
 
-    Vector6  wrench_tendons        = Vector6::Zero();
-    Matrix64 d_wrench_d_tensions   = Matrix64::Zero();
-    Matrix66 d_wrench_d_pose       = Matrix66::Zero();
-    Matrix66 d_wrench_d_pose_prev  = Matrix66::Zero();
-    Matrix66 d_wrench_d_pose_next  = Matrix66::Zero();
+    Vector6 wrench_tendons        = Vector6::Zero();
+    Matrix  d_wrench_d_tensions   = Matrix::Zero(6, tensions.size());
+    Matrix66 d_wrench_d_pose      = Matrix66::Zero();
+    Matrix66 d_wrench_d_pose_prev = Matrix66::Zero();
+    Matrix66 d_wrench_d_pose_next = Matrix66::Zero();
 
     for (int i = 0; i < tensions.size(); ++i) {
         Vector6 dT_prev;
@@ -93,13 +97,17 @@ Vector TendonDiscWrenchFactor::unwhitenedError(
         d_wrench_d_tensions.col(i) = dT;
     }
 
+    Vector6 wrench_external = Vector6::Zero();
+    if (has_external_wrench_)
+        wrench_external = x.at<Vector6>(keys()[ext_wrench_idx]);
+
     if (H) {
         (*H)[0] = -d_wrench_d_pose_prev;
         (*H)[1] = -d_wrench_d_pose;
         if (!is_tip_) (*H)[2] = -d_wrench_d_pose_next;
-        (*H)[wrench_idx]     =  Matrix6::Identity();
-        (*H)[tensions_idx]   = -d_wrench_d_tensions;
-        (*H)[ext_wrench_idx] = -Matrix6::Identity();
+        (*H)[wrench_idx]   =  Matrix6::Identity();
+        (*H)[tensions_idx] = -d_wrench_d_tensions;
+        if (has_external_wrench_) (*H)[ext_wrench_idx] = -Matrix6::Identity();
     }
 
     return wrench - wrench_tendons - wrench_external;

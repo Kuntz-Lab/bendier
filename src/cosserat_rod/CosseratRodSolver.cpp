@@ -21,13 +21,15 @@ CosseratRodSolver::CosseratRodSolver(const CosseratRodSolverConfig& config)
     base_pose_noise_ = get_noise_model_rot_pos(
         config.sigma_base_pose_rot, config.sigma_base_pose_pos);
 
-    model_ = std::make_unique<CosseratRodModel>(
-        config.num_nodes,
-        config.K_inv,
-        strain_noise,
-        small_wrench_noise_,
-        config.num_magnus_terms,
-        config.rod_length);
+    model_ = std::make_unique<CosseratRodModel>(CosseratRodModelConfig{
+        .num_nodes = config.num_nodes,
+        .K_inv = config.K_inv,
+        .strain_noise = strain_noise,
+        .stress_noise = small_wrench_noise_,
+        .num_magnus_terms = config.num_magnus_terms,
+        .rod_length = config.rod_length,
+        .wrench_node_indices = {0, config.num_nodes - 1},  // Only base and tip have wrenches for this solver
+    });
 }
 
 Solution<CosseratRodModel::ModelMarginals> CosseratRodSolver::solve(
@@ -42,13 +44,9 @@ Solution<CosseratRodModel::ModelMarginals> CosseratRodSolver::solve(
     priors.add(PriorFactor<Pose3>(
         model_->get_pose_key(0), Pose3::Identity(), base_pose_noise_));
 
-    auto wrench_keys = model_->get_wrench_keys();
-    for (size_t i = 1; i + 1 < wrench_keys.size(); ++i)
-        priors.add(PriorFactor<Vector6>(wrench_keys[i], Vector6::Zero(), small_wrench_noise_));
-
     if (tip_wrench)
         priors.add(PriorFactor<Vector6>(
-            wrench_keys.back(),
+            model_->get_wrench_key(-1),
             tip_wrench->mean,
             noiseModel::Gaussian::Covariance(tip_wrench->cov)));
 

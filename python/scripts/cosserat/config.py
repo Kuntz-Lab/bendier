@@ -36,7 +36,6 @@ def _default_base():
 DEFAULTS = dict(
     rod_length=0.5,
     num_nodes=15,
-    num_magnus_terms=4,
     K_inv=get_K_inv(),
     sigma_strain_pos=0.003,
     sigma_strain_rot=0.03,

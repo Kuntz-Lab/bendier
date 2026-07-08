@@ -27,7 +27,7 @@ void bind_utils(py::module& m) {
     bind_gaussian<Vector6Gaussian, gtsam::Vector6, gtsam::Matrix6>(m, "Vector6Gaussian");
     bind_gaussian<Pose3Gaussian,   gtsam::Matrix4, gtsam::Matrix6>(m, "Pose3Gaussian");
     bind_gaussian<Vector3Gaussian, gtsam::Vector3, gtsam::Matrix3>(m, "Vector3Gaussian");
-    bind_gaussian<Vector4Gaussian, gtsam::Vector4, gtsam::Matrix4>(m, "Vector4Gaussian");
+    bind_gaussian<VectorXGaussian, gtsam::Vector, gtsam::Matrix>(m, "VectorXGaussian");
 }
 
 PYBIND11_MODULE(_bendier, m) {

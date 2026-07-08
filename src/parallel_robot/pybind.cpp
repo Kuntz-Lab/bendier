@@ -15,8 +15,8 @@ void bind_parallel_robot(py::module& m) {
                 const gtsam::Matrix6&,
                 double, double,
                 double, double,
-                const std::array<gtsam::Matrix4, NUM_RODS>&,
-                const std::array<gtsam::Matrix4, NUM_RODS>&,
+                std::vector<gtsam::Matrix4>,
+                std::vector<gtsam::Matrix4>,
                 double, double,
                 const SolverBaseConfig&>(),
             py::arg("nodes_per_rod"),
@@ -43,7 +43,7 @@ void bind_parallel_robot(py::module& m) {
 
     py::class_<ActuationForceMeas>(m, "ActuationForceMeas")
         .def(py::init<>())
-        .def(py::init<const gtsam::Vector6&, double>(),
+        .def(py::init<const gtsam::Vector&, double>(),
             py::arg("meas"), py::arg("sigma"))
         .BIND_FIELD(ActuationForceMeas, meas)
         .BIND_FIELD(ActuationForceMeas, sigma);

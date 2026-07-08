@@ -1,8 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import argparse
 
-from bendier import TendonRobotSolver, Vector6Gaussian, Vector4Gaussian, Vector3Gaussian
+from bendier import TendonRobotSolver, Vector6Gaussian, VectorXGaussian, Vector3Gaussian
 
 from bendier.plotting.tendon_robot_plotter import TendonRobotPlotter
 from bendier.plotting.utils import setup_plt
@@ -25,7 +24,7 @@ def run_sim(params, do_baseline, plot):
     )
     
     # Setup baseline solver (get holes from dummy solution)
-    dummy_solution = solver_nominal.solve(Vector4Gaussian(np.zeros(4), np.eye(4)), Vector6Gaussian(np.zeros(6), np.eye(6)), None)
+    dummy_solution = solver_nominal.solve(VectorXGaussian(np.zeros(4), np.eye(4)), Vector6Gaussian(np.zeros(6), np.eye(6)), None)
     solver_baseline = TendonRobotBaseline(K_inv=DEFAULTS['K_inv'], num_discs=DEFAULTS['num_discs'], rod_length=DEFAULTS['rod_length'], holes=dummy_solution.marginals.tendon_config.hole_locations)
 
     # Simulator to sample tip pose data
@@ -64,7 +63,7 @@ def run_sim(params, do_baseline, plot):
         q_noise = q_noise_model.step(params.q_meas_cov)
         q_nominal_gt = q_nominal + q_noise
         solution_nominal = solver_nominal.solve(
-            Vector4Gaussian(q_nominal_gt, params.small_q_cov),
+            VectorXGaussian(q_nominal_gt, params.small_q_cov),
             Vector6Gaussian(np.hstack((np.zeros(3), f_gt)), params.small_wrench_cov),
             None
         )
@@ -80,7 +79,7 @@ def run_sim(params, do_baseline, plot):
         # Simulated solution to sample position from, small covariances
         q_gt = q_cmd + q_noise
         solution_gt = solver_gt.solve(
-            Vector4Gaussian(q_gt, params.small_q_cov),
+            VectorXGaussian(q_gt, params.small_q_cov),
             Vector6Gaussian(np.hstack((np.zeros(3), f_gt)), params.small_wrench_cov),
             None
         )
@@ -91,7 +90,7 @@ def run_sim(params, do_baseline, plot):
 
         # Use the sampled position as a prior on tip pose
         solution_post = solver_post.solve(
-            Vector4Gaussian(q_cmd, params.q_meas_cov),
+            VectorXGaussian(q_cmd, params.q_meas_cov),
             Vector6Gaussian(np.zeros(6), params.wrench_prior_cov),
             Vector3Gaussian(p_meas, params.p_meas_cov)
         )
@@ -99,7 +98,7 @@ def run_sim(params, do_baseline, plot):
         # Evaluate the Jacobian for control using the estimated tip wrench
         wrench_post = solution_post.marginals.external_wrenches[-1]
         solution_jac = solver_jac.solve(
-            Vector4Gaussian(q_cmd, params.small_q_cov),
+            VectorXGaussian(q_cmd, params.small_q_cov),
             wrench_post,
             None
         )

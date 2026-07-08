@@ -25,7 +25,7 @@ def main():
         tip_wrench_mean = np.zeros(6)
         tip_wrench_mean[5] = 0.12 * np.sin(1.0 * t)
 
-        tensions = bendier.Vector4Gaussian(tensions_mean, tensions_cov)
+        tensions = bendier.VectorXGaussian(tensions_mean, tensions_cov)
         tip_wrench = bendier.Vector6Gaussian(tip_wrench_mean, tip_wrench_cov)
 
         solution = solver.solve(tensions, tip_wrench, None)

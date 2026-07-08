@@ -1,6 +1,7 @@
 #include "ParallelRobotModel.h"
 
 #include <cmath>
+#include <stdexcept>
 #include <gtsam/base/Vector.h>
 #include <gtsam/slam/BetweenFactor.h>
 
@@ -20,29 +21,42 @@ ParallelRobotModel::ParallelRobotModel(
     Matrix6 K_inv,
     SharedDiagonal strain_noise,
     SharedDiagonal stress_noise,
-    std::array<Matrix4, NUM_RODS> base_end_poses,
-    std::array<Matrix4, NUM_RODS> tip_end_poses,
+    std::vector<Matrix4> base_end_poses,
+    std::vector<Matrix4> tip_end_poses,
     double sigma_end_pose_pos,
     double sigma_end_pose_rot,
     double sigma_rod_lengths)
 :
-    id_(next_id_++),
-    base_end_poses_(base_end_poses),
-    tip_end_poses_(tip_end_poses),
+    base_end_poses_(std::move(base_end_poses)),
+    tip_end_poses_(std::move(tip_end_poses)),
     small_wrench_noise_(stress_noise),
+    id_(next_id_++),
     sigma_end_pose_pos_(sigma_end_pose_pos),
     sigma_end_pose_rot_(sigma_end_pose_rot),
     sigma_rod_lengths_(sigma_rod_lengths)
 {
-    for (int i = 0; i < NUM_RODS; i++) {
-        rods_[i] = std::make_unique<CosseratRodModel>(
-            nodes_per_rod, K_inv, strain_noise, stress_noise, 4);
+    if (base_end_poses_.size() != tip_end_poses_.size())
+        throw std::invalid_argument(
+            "ParallelRobotModel: base_end_poses and tip_end_poses must be the same size");
+
+    const int num_rods = static_cast<int>(base_end_poses_.size());
+    rods_.reserve(num_rods);
+    for (int i = 0; i < num_rods; i++) {
+        // Only the base and tip nodes of each rod get a wrench variable.
+        // Assumes no forces along interior of rods, which could be added later if needed.
+        rods_.push_back(std::make_unique<CosseratRodModel>(CosseratRodModelConfig{
+            .num_nodes = nodes_per_rod,
+            .K_inv = K_inv,
+            .strain_noise = strain_noise,
+            .stress_noise = stress_noise,
+            .wrench_node_indices = {0, nodes_per_rod - 1},
+        }));
     }
 }
 
-void ParallelRobotModel::set_rod_lengths(const std::array<double, NUM_RODS>& rod_lengths) {
+void ParallelRobotModel::set_rod_lengths(const Vector& rod_lengths) {
     rod_lengths_ = rod_lengths;
-    for (int i = 0; i < NUM_RODS; i++)
+    for (size_t i = 0; i < rods_.size(); i++)
         rods_[i]->set_rod_length(rod_lengths[i]);
 }
 
@@ -69,14 +83,13 @@ NonlinearFactorGraph ParallelRobotModel::build_graph() const
         sigma_end_pose_pos_, sigma_end_pose_pos_, sigma_rod_lengths_,
         1.0e-4).finished());
 
-    for (int i = 0; i < NUM_RODS; i++) {
-        graph.add(rods_[i]->build_graph());
+    KeyVector tip_stress_keys;
+    KeyVector tip_pose_keys;
+    tip_stress_keys.reserve(rods_.size());
+    tip_pose_keys.reserve(rods_.size());
 
-        // Constrain interior wrenches to zero (skip base and tip)
-        std::vector<Key> wrench_keys = rods_[i]->get_wrench_keys();
-        for (size_t j = 1; j + 1 < wrench_keys.size(); ++j) {
-            graph.add(PriorFactor<Vector6>(wrench_keys[j], Vector6::Zero(), small_wrench_noise_));
-        }
+    for (size_t i = 0; i < rods_.size(); i++) {
+        graph.add(rods_[i]->build_graph());
 
         // Base pose prior
         graph.add(SingleRodBaseFactor(
@@ -91,22 +104,15 @@ NonlinearFactorGraph ParallelRobotModel::build_graph() const
             rods_[i]->get_pose_key(-1),
             Pose3(tip_end_poses_[i]),
             tip_pose_noise));
+
+        tip_stress_keys.push_back(rods_[i]->get_stress_key(-1));
+        tip_pose_keys.push_back(rods_[i]->get_pose_key(-1));
     }
 
-    // Sum of all transformed tip stresses equals zero
+    // Sum of all transformed tip stresses equals the platform wrench
     graph.add(PlatformWrenchBalanceFactor(
-        rods_[0]->get_stress_key(-1),
-        rods_[0]->get_pose_key(-1),
-        rods_[1]->get_stress_key(-1),
-        rods_[1]->get_pose_key(-1),
-        rods_[2]->get_stress_key(-1),
-        rods_[2]->get_pose_key(-1),
-        rods_[3]->get_stress_key(-1),
-        rods_[3]->get_pose_key(-1),
-        rods_[4]->get_stress_key(-1),
-        rods_[4]->get_pose_key(-1),
-        rods_[5]->get_stress_key(-1),
-        rods_[5]->get_pose_key(-1),
+        tip_stress_keys,
+        tip_pose_keys,
         platform_wrench_key(),
         platform_pose_key(),
         small_wrench_noise_));
@@ -117,13 +123,13 @@ NonlinearFactorGraph ParallelRobotModel::build_graph() const
 Values ParallelRobotModel::get_initial_values() const {
     Values values;
 
-    for (int i = 0; i < NUM_RODS; i++) {
+    for (size_t i = 0; i < rods_.size(); i++) {
         values.insert(rods_[i]->get_initial_values(Pose3(base_end_poses_[i])));
     }
 
     // Kind of sloppy here but it works
     double mean_rod_length = 0;
-    for (double l : rod_lengths_) mean_rod_length += l / NUM_RODS;
+    for (double l : rod_lengths_) mean_rod_length += l / static_cast<double>(rods_.size());
     values.insert(platform_pose_key(), Pose3(Rot3::Rz(M_PI), Point3(0, 0, mean_rod_length)));
     values.insert(platform_wrench_key(), Vector6(Vector6::Zero()));
 
@@ -136,7 +142,8 @@ ParallelRobotMarginals ParallelRobotModel::get_marginals(
 {
     ParallelRobotMarginals solution;
 
-    for (int i = 0; i < NUM_RODS; i++) {
+    solution.rods.resize(rods_.size());
+    for (size_t i = 0; i < rods_.size(); i++) {
         solution.rods[i] = rods_[i]->get_marginals(values, marginals);
     }
 
@@ -152,8 +159,9 @@ ParallelRobotMarginals ParallelRobotModel::get_marginals(
     return solution;
 }
 
+Matrix ParallelRobotModel::get_rod_lengths_jacobian(const Marginals& marginals) const {
+    const int num_rods = static_cast<int>(rods_.size());
 
-Matrix6 ParallelRobotModel::get_rod_lengths_jacobian(const Marginals& marginals) const {
     KeyVector keys;
     for (const auto& rod : rods_) {
         keys.push_back(rod->get_pose_key(0));
@@ -165,23 +173,23 @@ Matrix6 ParallelRobotModel::get_rod_lengths_jacobian(const Marginals& marginals)
     JointMarginal joint = marginals.jointMarginalCovariance(keys);
 
     // How do the rod lengths vary together?
-    Matrix6 sigma_QQ = Matrix6::Zero();
-    for (int i = 0; i < NUM_RODS; ++i) {
-        for (int j = 0; j < NUM_RODS; ++j) {
+    Matrix sigma_QQ = Matrix::Zero(num_rods, num_rods);
+    for (int i = 0; i < num_rods; ++i) {
+        for (int j = 0; j < num_rods; ++j) {
             sigma_QQ(i, j) = joint(keys[i], keys[j])(5, 5);
         }
     }
 
     // How is platform pose correlated with rod lengths?
-    Matrix6 sigma_TQ = Matrix6::Zero();
-    for (int j = 0; j < NUM_RODS; ++j) {
+    Matrix sigma_TQ = Matrix::Zero(6, num_rods);
+    for (int j = 0; j < num_rods; ++j) {
         Matrix6 block = joint(T, keys[j]);
         sigma_TQ.col(j) = block.col(5);
     }
 
     // Solve, see paper for why this works.
-    Eigen::LDLT<Matrix6> ldlt(sigma_QQ);
-    return sigma_TQ * ldlt.solve(Matrix6::Identity());
+    Eigen::LDLT<Matrix> ldlt(sigma_QQ);
+    return sigma_TQ * ldlt.solve(Matrix::Identity(num_rods, num_rods));
 }
 
 Matrix6 ParallelRobotModel::get_tip_wrench_jacobian(const Marginals& marginals) const {

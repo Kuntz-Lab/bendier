@@ -1,9 +1,13 @@
+import itertools
+
 import numpy as np
 import pyvista as pv
 import vtk
 
 from . import utils
 from .cosserat_rod_plotter import CosseratRodMeshManager
+
+TENDON_COLORS = ["crimson", "forestgreen", "royalblue", "mediumorchid", "goldenrod", "deeppink"]
 
 
 class TendonRobotPlotter:
@@ -41,12 +45,12 @@ class TendonRobotPlotter:
         num_discs = solution.marginals.tendon_config.num_discs
 
         if self.plotter.frame == 0:
-            tendon_colors = ["crimson", "forestgreen", "royalblue", "mediumorchid", "goldenrod", "deeppink"]
+            colors = itertools.cycle(TENDON_COLORS)
             self.tendon_meshes = []
-            for i in range(num_tendons):
+            for _ in range(num_tendons):
                 points = np.zeros((num_discs, 3))
                 mesh = pv.lines_from_points(points)
-                self.plotter.plotter.add_mesh(mesh, line_width=6, color=tendon_colors[i])
+                self.plotter.plotter.add_mesh(mesh, line_width=6, color=next(colors))
                 self.tendon_meshes.append(mesh)
 
         for jj in range(num_tendons):

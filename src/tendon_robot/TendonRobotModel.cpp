@@ -24,23 +24,52 @@ TendonRobotModel::TendonRobotModel(
     SharedDiagonal strain_noise,
     SharedDiagonal stress_noise,
     Pose3 base_pose_mean,
-    SharedDiagonal base_pose_noise)
+    SharedDiagonal base_pose_noise,
+    const std::vector<int>& external_wrench_node_indices)
 :
     rod_length_(rod_length),
     num_discs_(num_discs),
-    num_nodes_(num_discs + (num_discs - 1) * num_between_nodes),
+    num_nodes_(TendonRobotNumNodes(num_discs, num_between_nodes)),
+    num_tendons_(static_cast<int>(tendon_input.functions.size())),
     stress_noise_(stress_noise),
     base_pose_mean_(base_pose_mean),
     base_pose_noise_(base_pose_noise)
 {
-    rod_ = std::make_unique<CosseratRodModel>(
-        num_nodes_, K_inv, strain_noise, stress_noise, 4, rod_length_);
+    if (tendon_input.params.size() != tendon_input.functions.size())
+        throw std::invalid_argument(
+            "TendonRobotModel: tendon_input.params and .functions must be the same size");
 
     init_tendon_disc_config(tendon_input);
+    
+    // Determine which nodes have a true external wrench variable (other than disc wrenches)
+    is_external_wrench_node_.assign(num_nodes_, false);
+    for (int idx : external_wrench_node_indices)
+        is_external_wrench_node_[idx] = true;
+    
+    // The underlying cosserat rod will have a wrench at nodes that either have a disc or are a true external wrench node
+    std::vector<bool> rod_wants_wrench = is_external_wrench_node_;
+    for (size_t disc_idx = 1; disc_idx < tendon_config_.disc_pose_idx.size(); ++disc_idx)
+        rod_wants_wrench[tendon_config_.disc_pose_idx[disc_idx]] = true;
+    
+    // Extract the indices of the rod nodes that will have a wrench variable
+    std::vector<int> rod_wrench_node_indices;
+    for (int i = 0; i < num_nodes_; ++i)
+        if (rod_wants_wrench[i])
+            rod_wrench_node_indices.push_back(i);
+
+    rod_ = std::make_unique<CosseratRodModel>(CosseratRodModelConfig{
+        .num_nodes = num_nodes_,
+        .K_inv = K_inv,
+        .strain_noise = strain_noise,
+        .stress_noise = stress_noise,
+        .rod_length = rod_length_,
+        .wrench_node_indices = rod_wrench_node_indices,
+    });
 }
 
 void TendonRobotModel::init_tendon_disc_config(TendonInput routing) {
     tendon_config_.num_discs = num_discs_;
+    tendon_config_.num_tendons = num_tendons_;
     tendon_config_.disc_pose_idx.reserve(num_discs_);
     tendon_config_.routing_radius = routing.routing_radius;
     tendon_config_.hole_locations.reserve(num_discs_);
@@ -63,9 +92,9 @@ void TendonRobotModel::init_tendon_disc_config(TendonInput routing) {
         int closest_pose_idx = static_cast<int>(std::round(s * (num_nodes_ - 1)));
 
         tendon_config_.disc_pose_idx.push_back(closest_pose_idx);
-        std::array<Vector3, NUM_TENDONS> holes;
+        std::vector<Vector3> holes(num_tendons_);
 
-        for (int tendon_idx = 0; tendon_idx < NUM_TENDONS; ++tendon_idx) {
+        for (int tendon_idx = 0; tendon_idx < num_tendons_; ++tendon_idx) {
             double theta;
 
             if (routing.functions[tendon_idx] == RoutingAngleFunction::CONSTANT) {
@@ -113,15 +142,21 @@ Key TendonRobotModel::get_disc_wrench_key(int disc_idx) const {
     return Symbol('D', disc_idx);
 }
 
-Key TendonRobotModel::get_external_wrench_key(int node_idx) const {
-    // If we are at a disc, use disc wrench key
+std::optional<Key> TendonRobotModel::get_external_wrench_key(int node_idx) const {
+    if (!is_external_wrench_node_[node_idx])
+        return std::nullopt;
+
+    // A non-base disc has its own dedicated external-wrench variable,
+    // separate from the rod's own wrench key at that node (which is fully
+    // determined by TendonDiscWrenchFactor's tendon-force equation).
     for (size_t disc_idx = 1; disc_idx < tendon_config_.disc_pose_idx.size(); ++disc_idx) {
         if (tendon_config_.disc_pose_idx[disc_idx] == node_idx) {
             return get_disc_wrench_key(disc_idx);
         }
     }
 
-    // Else use wrench key from rod model
+    // Otherwise (base disc, or a genuinely non-disc node), the rod's own
+    // wrench key directly represents the external wrench.
     return rod_->get_wrench_key(node_idx);
 }
 
@@ -129,12 +164,11 @@ Values TendonRobotModel::get_initial_values() const {
     Values values;
 
     values.insert(rod_->get_initial_values());
-
-    Eigen::Vector<double, NUM_TENDONS> zero = Eigen::Vector<double, NUM_TENDONS>::Zero();
-    values.insert(get_tensions_key(), zero);
+    values.insert(get_tensions_key(), Vector(Vector::Zero(num_tendons_)));
 
     for (size_t disc_idx = 1; disc_idx < tendon_config_.disc_pose_idx.size(); ++disc_idx) {
-        values.insert(get_disc_wrench_key(disc_idx), Vector6(Vector6::Zero()));
+        if (is_external_wrench_node_[tendon_config_.disc_pose_idx[disc_idx]])
+            values.insert(get_disc_wrench_key(disc_idx), Vector6(Vector6::Zero()));
     }
 
     return values;
@@ -151,37 +185,33 @@ NonlinearFactorGraph TendonRobotModel::build_graph() const
     for (size_t disc_idx = 1; disc_idx < num_discs_; ++disc_idx) {
         int pose_idx = tendon_config_.disc_pose_idx[disc_idx];
         int pose_idx_prev = tendon_config_.disc_pose_idx[disc_idx - 1];
-        std::array<Vector3, NUM_TENDONS> holes_prev = tendon_config_.hole_locations[disc_idx - 1];
-        std::array<Vector3, NUM_TENDONS> holes = tendon_config_.hole_locations[disc_idx];
+        const std::vector<Vector3>& holes_prev = tendon_config_.hole_locations[disc_idx - 1];
+        const std::vector<Vector3>& holes = tendon_config_.hole_locations[disc_idx];
 
-        // Add the factor that relates poses, tensions, wrenches together for the disc
-        if (disc_idx == num_discs_ - 1) {
-            // Tip disc: there is no next disc, so use 5-key constructor
-            graph.add(TendonDiscWrenchFactor(
-                rod_->get_pose_key(pose_idx_prev),
-                rod_->get_pose_key(pose_idx),
-                rod_->get_wrench_key(pose_idx),
-                get_tensions_key(),
-                get_disc_wrench_key(disc_idx),
-                holes_prev,
-                holes,
-                stress_noise_));
-        } else {
-            int pose_idx_next = tendon_config_.disc_pose_idx[disc_idx + 1];
-            auto holes_next   = tendon_config_.hole_locations[disc_idx + 1];
+        // Only include the external-wrench key if this disc is actually a
+        // true external-wrench location; otherwise the disc's rod wrench is
+        // fully determined by tendon force alone.
+        std::optional<Key> ext_key = is_external_wrench_node_[pose_idx]
+            ? std::optional<Key>(get_disc_wrench_key(disc_idx)) : std::nullopt;
 
-            graph.add(TendonDiscWrenchFactor(
-                rod_->get_pose_key(pose_idx_prev),
-                rod_->get_pose_key(pose_idx),
-                rod_->get_pose_key(pose_idx_next),
-                rod_->get_wrench_key(pose_idx),
-                get_tensions_key(),
-                get_disc_wrench_key(disc_idx),
-                holes_prev,
-                holes,
-                holes_next,
-                stress_noise_));
-        }
+        // Tip disc (last one): no next disc.
+        bool is_tip = (disc_idx == num_discs_ - 1);
+        std::optional<Key> pose_next_key = is_tip
+            ? std::nullopt : std::optional<Key>(rod_->get_pose_key(tendon_config_.disc_pose_idx[disc_idx + 1]));
+        const std::vector<Vector3>& holes_next = is_tip
+            ? holes /* unused when is_tip */ : tendon_config_.hole_locations[disc_idx + 1];
+
+        graph.add(TendonDiscWrenchFactor(
+            rod_->get_pose_key(pose_idx_prev),
+            rod_->get_pose_key(pose_idx),
+            pose_next_key,
+            rod_->get_wrench_key(pose_idx),
+            get_tensions_key(),
+            ext_key,
+            holes_prev,
+            holes,
+            holes_next,
+            stress_noise_));
     }
 
     return graph;
@@ -193,8 +223,8 @@ void TendonRobotModel::get_J_pose_tensions(const Marginals& marginals, TendonRob
     Key T = rod_->get_pose_key(-1);
     JointMarginal joint = marginals.jointMarginalCovariance({Q, T});
 
-    Matrix64 sigma_TQ = joint(T, Q);
-    Matrix4 sigma_QQ_inv = marginals.marginalInformation(Q);
+    Matrix sigma_TQ = joint(T, Q);      // 6 x num_tendons
+    Matrix sigma_QQ_inv = marginals.marginalInformation(Q);  // num_tendons x num_tendons
 
     out.J_pose_tensions = sigma_TQ * sigma_QQ_inv;
 }
@@ -208,15 +238,17 @@ TendonRobotMarginals TendonRobotModel::get_marginals(
     m.rod = rod_->get_marginals(values, marginals);
     m.tendon_config = tendon_config_;
 
-    m.tensions.mean = values.at<Vector4>(get_tensions_key());
+    m.tensions.mean = values.at<Vector>(get_tensions_key());
     m.tensions.cov = marginals.marginalCovariance(get_tensions_key());
 
     m.external_wrenches.resize(num_nodes_);
     for (int i = 0; i < num_nodes_; i++) {
-        Key key = get_external_wrench_key(i);
+        std::optional<Key> key = get_external_wrench_key(i);
+        if (!key) continue;
+
         Vector6Gaussian wrench;
-        wrench.mean = values.at<Vector6>(key);
-        wrench.cov = marginals.marginalCovariance(key);
+        wrench.mean = values.at<Vector6>(*key);
+        wrench.cov = marginals.marginalCovariance(*key);
         m.external_wrenches[i] = wrench;
     }
 

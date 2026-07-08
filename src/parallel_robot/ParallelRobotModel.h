@@ -4,15 +4,15 @@
 #include "utils/Gaussians.h"
 #include <gtsam/linear/NoiseModel.h>
 
-constexpr int NUM_RODS = 6;
+#include <vector>
 
 struct ParallelRobotMarginals {
-    std::array<CosseratRodMarginals, NUM_RODS> rods;
+    std::vector<CosseratRodMarginals> rods;
 
     Pose3Gaussian platform_pose;
     Vector6Gaussian platform_wrench;
 
-    gtsam::Matrix6 rod_lengths_jacobian;
+    gtsam::Matrix rod_lengths_jacobian;  // 6 x num_rods
     gtsam::Matrix6 tip_wrench_jacobian;
 };
 
@@ -20,18 +20,19 @@ class ParallelRobotModel {
 public:
     using ModelMarginals = ParallelRobotMarginals;
 
+    // Rod count is base_end_poses.size() -- must match tip_end_poses.size().
     ParallelRobotModel(
         int nodes_per_rod,
         gtsam::Matrix6 K_inv,
         gtsam::SharedDiagonal strain_noise,
         gtsam::SharedDiagonal stress_noise,
-        std::array<gtsam::Matrix4, NUM_RODS> base_end_poses,
-        std::array<gtsam::Matrix4, NUM_RODS> tip_end_poses,
+        std::vector<gtsam::Matrix4> base_end_poses,
+        std::vector<gtsam::Matrix4> tip_end_poses,
         double sigma_end_pose_pos,
         double sigma_end_pose_rot,
         double sigma_rod_lengths);
 
-    void set_rod_lengths(const std::array<double, NUM_RODS>& rod_lengths);
+    void set_rod_lengths(const gtsam::Vector& rod_lengths);
 
     void set_sigma_rod_lengths(double sigma_rod_lengths);
 
@@ -43,20 +44,22 @@ public:
         const gtsam::Values& values,
         const gtsam::Marginals& marginals) const;
 
-    gtsam::Matrix6 get_rod_lengths_jacobian(const gtsam::Marginals& marginals) const;
+    gtsam::Matrix get_rod_lengths_jacobian(const gtsam::Marginals& marginals) const;  // 6 x num_rods
 
     gtsam::Matrix6 get_tip_wrench_jacobian(const gtsam::Marginals& marginals) const;
 
     gtsam::Key get_rod_wrench_key(int rod_idx, int node_idx) const;
 
     gtsam::Key platform_pose_key() const;
-    
+
     gtsam::Key platform_wrench_key() const;
 
+    inline int get_num_rods() const { return static_cast<int>(rods_.size()); }
+
 private:
-    std::array<std::unique_ptr<CosseratRodModel>, NUM_RODS> rods_;
-    const std::array<gtsam::Matrix4, NUM_RODS> base_end_poses_;
-    const std::array<gtsam::Matrix4, NUM_RODS> tip_end_poses_;
+    std::vector<std::unique_ptr<CosseratRodModel>> rods_;
+    const std::vector<gtsam::Matrix4> base_end_poses_;
+    const std::vector<gtsam::Matrix4> tip_end_poses_;
     const gtsam::SharedDiagonal small_wrench_noise_;
 
     const int id_;
@@ -65,5 +68,5 @@ private:
     const double sigma_end_pose_pos_;
     const double sigma_end_pose_rot_;
     double sigma_rod_lengths_;
-    std::array<double, NUM_RODS> rod_lengths_ {};
+    gtsam::Vector rod_lengths_;
 };

@@ -3,9 +3,9 @@
 #include <gtsam/base/Vector.h>
 #include <gtsam/base/Matrix.h>
 
-struct Vector4Gaussian {
-    gtsam::Vector4 mean;
-    gtsam::Matrix4 cov;
+struct VectorXGaussian {
+    gtsam::Vector mean;
+    gtsam::Matrix cov;
 };
 
 struct Vector3Gaussian {
