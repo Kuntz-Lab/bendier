@@ -145,7 +145,7 @@ def main():
     
     t, data = run_sim(params, do_baseline=True, plot=True)
 
-    if len(data['p_baseline'] > 0):
+    if len(data['p_baseline']) > 0:
         setup_plt()
         plt.figure()
         baseline_err = 1000 * np.linalg.norm(data['p_nominal'] - data['p_baseline'], axis=1)

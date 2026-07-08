@@ -9,23 +9,21 @@ class CosseratRodMeshManager:
                  plot_base_plate=True,
                  plot_tip_plate=False,
                  plot_wrenches=True,
-                 plot_internal_wrenches=False,
                  plot_base_wrench=False,
                  plot_backbone_frames=False,
                  plot_backbone_ellipsoids=True,
                  skip_backbone_ellipsoids=1,
-                 backbone_radius=0.005, 
-                 moment_scale = 0.2, 
-                 force_scale=0.1, 
-                 base_plate_size=0.1, 
+                 backbone_radius=0.005,
+                 moment_scale = 0.2,
+                 force_scale=0.1,
+                 base_plate_size=0.1,
                  cartesian_frame_scale=0.01,
                  rod_color='ultramarine',
                  rod_opacity=0.3):
-        
+
         self.plot_base_plate = plot_base_plate
         self.plot_tip_plate = plot_tip_plate
         self.plot_wrenches = plot_wrenches
-        self.plot_internal_wrenches = plot_internal_wrenches
         self.plot_base_wrench = plot_base_wrench
         self.plot_backbone_frames = plot_backbone_frames
         self.plot_backbone_ellipsoids = plot_backbone_ellipsoids
@@ -208,23 +206,21 @@ class CosseratRodPlotter:
                  plot_base_plate=True,
                  plot_tip_plate=False,
                  plot_wrenches=True,
-                 plot_internal_wrenches=False,
                  plot_base_wrench=False,
                  plot_backbone_frames=False,
                  plot_backbone_ellipsoids=True,
-                 backbone_radius=0.005, 
-                 moment_scale = 0.2, 
-                 force_scale=0.1, 
-                 base_plate_size=0.1, 
+                 backbone_radius=0.005,
+                 moment_scale = 0.2,
+                 force_scale=0.1,
+                 base_plate_size=0.1,
                  cartesian_frame_scale=0.03,
                  **kwargs):
-    
+
         self.plotter = utils.PlotterBase(**kwargs)
         self.mesh_manager = CosseratRodMeshManager(
             plot_base_plate=plot_base_plate,
             plot_tip_plate=plot_tip_plate,
             plot_wrenches=plot_wrenches,
-            plot_internal_wrenches=plot_internal_wrenches,
             plot_base_wrench=plot_base_wrench,
             plot_backbone_frames=plot_backbone_frames,
             plot_backbone_ellipsoids=plot_backbone_ellipsoids,

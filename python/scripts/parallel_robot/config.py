@@ -34,7 +34,7 @@ def get_tip_poses():
     return get_end_poses(angles, radius=0.1, z_offset=platform_z_offset)
 
 
-def _get_K_inv():
+def get_K_inv():
     r = 0.0015 / 2
     I = 0.25 * np.pi * r ** 4
     A = np.pi * r ** 2
@@ -54,7 +54,7 @@ def _get_K_inv():
 
 DEFAULTS = dict(
     nodes_per_rod=15,
-    K_inv=_get_K_inv(),
+    K_inv=get_K_inv(),
     sigma_strain_pos=0.0025,
     sigma_strain_rot=0.025,
     sigma_small_force=1.0e-3,

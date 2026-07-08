@@ -95,8 +95,8 @@ class CosseratRodBaseline:
         return res
     
     def solve(self, tip_wrench=np.zeros(6)):
-        result = root(self.shooting_residual, self.base_stress_guess, args=(tip_wrench), tol=1e-10)
-        self.base_conditions_guess = result.x
+        result = root(self.shooting_residual, self.base_stress_guess, args=(tip_wrench,), tol=1e-10)
+        self.base_stress_guess = result.x
         
         solution = self.integrate(result.x)
         
