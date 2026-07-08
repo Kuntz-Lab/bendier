@@ -1,8 +1,8 @@
-#pragma once 
+#pragma once
 
 #include <gtsam/geometry/Pose3.h>
 
-gtsam::Vector6 transform_wrench_adjoint(
+gtsam::Vector6 transform_wrench_translation(
         const gtsam::Vector6& wrench_0,
         const gtsam::Pose3& pose_0,
         const gtsam::Pose3& pose,

@@ -41,22 +41,17 @@ Vector CosseratStressFactor::unwhitenedError(
     const Vector6 s1 = x.at<Vector6>(keys()[3]);
     const Vector6 w1 = (keys().size() == 5) ? x.at<Vector6>(keys()[4]) : Vector6::Zero();
 
-    // Convert wrench from spatial to body frame of p1
-    Matrix6 d_body_d_p1, d_body_d_w1;
-    Vector6 body = spatial_to_body_wrench(w1, p1, d_body_d_w1, d_body_d_p1);
-
-    // Propagate stress from p0 to p1 frame and subtract body wrench
     Matrix6 d_s1_pred_d_p0, d_s1_pred_d_p1, d_s1_pred_d_s0;
-    Vector6 s1_pred = transform_wrench_adjoint(
+    Vector6 s1_pred = transform_wrench_translation(
         s0, p0, p1,
-        d_s1_pred_d_s0, d_s1_pred_d_p0, d_s1_pred_d_p1) - body;
+        d_s1_pred_d_s0, d_s1_pred_d_p0, d_s1_pred_d_p1) - w1;
 
     if (H) {
         (*H)[0] = d_s1_pred_d_p0;
-        (*H)[1] = d_s1_pred_d_p1 - d_body_d_p1;
+        (*H)[1] = d_s1_pred_d_p1;
         (*H)[2] = d_s1_pred_d_s0;
         (*H)[3] = -Matrix6::Identity();
-        if (keys().size() == 5) (*H)[4] = -d_body_d_w1;
+        if (keys().size() == 5) (*H)[4] = -Matrix6::Identity();
     }
 
     return s1_pred - s1;

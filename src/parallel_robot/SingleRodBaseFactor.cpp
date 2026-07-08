@@ -1,4 +1,5 @@
 #include "SingleRodBaseFactor.h"
+#include "utils/WrenchTransforms.h"
 
 using namespace gtsam;
 
@@ -24,12 +25,15 @@ Vector SingleRodBaseFactor::evaluateError(
     Matrix6 d_xi_d_delta;
     Vector6 xi = Pose3::Logmap(delta, d_xi_d_delta);
 
+    Matrix6 d_stress_body_d_stress, d_stress_body_d_pose;
+    Vector6 stress_body = spatial_to_body_wrench(stress, pose, d_stress_body_d_stress, d_stress_body_d_pose);
+
     // xi(2): rotation about the rod's mounting axis is omitted since the rod
     // spins freely about its axis so that DOF is unconstrained.
-    // stress(2) = torsional stress (S_z in body frame) is constrained to zero since
-    // the base joint is a bearing that cannot transmit axial torque.
+    // stress_body(2) = torsional stress (S_z in body frame) is constrained to
+    // zero since the base joint is a bearing that cannot transmit axial torque.
     Vector6 error;
-    error << xi(0), xi(1), xi(3), xi(4), xi(5), stress(2);
+    error << xi(0), xi(1), xi(3), xi(4), xi(5), stress_body(2);
 
     if (H1) {
         Matrix6 J = d_xi_d_delta * d_delta_d_pose;
@@ -41,14 +45,14 @@ Vector SingleRodBaseFactor::evaluateError(
         H.row(2) = J.row(3);
         H.row(3) = J.row(4);
         H.row(4) = J.row(5);
-        // row 5 stays zero
+        H.row(5) = d_stress_body_d_pose.row(2);
 
         *H1 = H;
     }
 
     if (H2) {
         Matrix6 H = Matrix6::Zero();
-        H(5,2) = 1.0;   // derivative of stress(2)
+        H.row(5) = d_stress_body_d_stress.row(2);
 
         *H2 = H;
     }

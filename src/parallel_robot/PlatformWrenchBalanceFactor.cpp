@@ -40,37 +40,31 @@ Vector PlatformWrenchBalanceFactor::evaluateError(
     OptionalMatrixType H11, OptionalMatrixType H12,
     OptionalMatrixType H13, OptionalMatrixType H14) const 
 {
-    // Transform all rod tip stresses to the platform pose frame
     Matrix6 d_s0_p_d_pp, d_s1_p_d_pp, d_s2_p_d_pp, d_s3_p_d_pp, d_s4_p_d_pp, d_s5_p_d_pp;
-    Vector6 s0_p = transform_wrench_adjoint(stress_0, pose_0, platform_pose,
+    Vector6 s0_p = transform_wrench_translation(stress_0, pose_0, platform_pose,
         H1 ? H1 : nullptr, H2 ? H2 : nullptr, d_s0_p_d_pp);
-    
-    Vector6 s1_p = transform_wrench_adjoint(stress_1, pose_1, platform_pose,
+
+    Vector6 s1_p = transform_wrench_translation(stress_1, pose_1, platform_pose,
         H3 ? H3 : nullptr, H4 ? H4 : nullptr, d_s1_p_d_pp);
 
-    Vector6 s2_p = transform_wrench_adjoint(stress_2, pose_2, platform_pose,
+    Vector6 s2_p = transform_wrench_translation(stress_2, pose_2, platform_pose,
         H5 ? H5 : nullptr, H6 ? H6 : nullptr, d_s2_p_d_pp);
 
-    Vector6 s3_p = transform_wrench_adjoint(stress_3, pose_3, platform_pose,
+    Vector6 s3_p = transform_wrench_translation(stress_3, pose_3, platform_pose,
         H7 ? H7 : nullptr, H8 ? H8 : nullptr, d_s3_p_d_pp);
 
-    Vector6 s4_p = transform_wrench_adjoint(stress_4, pose_4, platform_pose,
+    Vector6 s4_p = transform_wrench_translation(stress_4, pose_4, platform_pose,
         H9 ? H9 : nullptr, H10 ? H10 : nullptr, d_s4_p_d_pp);
 
-    Vector6 s5_p = transform_wrench_adjoint(stress_5, pose_5, platform_pose,
+    Vector6 s5_p = transform_wrench_translation(stress_5, pose_5, platform_pose,
         H11 ? H11 : nullptr, H12 ? H12 : nullptr, d_s5_p_d_pp);
-    
-    // Platform wrench is a world frame object, need to rotate into platform coords
-    Matrix6 d_wrench_body_d_platform_wrench, d_wrench_body_d_platform_pose;
-    Vector6 wrench_body = spatial_to_body_wrench(platform_wrench, platform_pose, d_wrench_body_d_platform_wrench, d_wrench_body_d_platform_pose);
-    
-    // All body frame wrenchs summed up should be zero
-    Vector6 stress_error = s0_p + s1_p + s2_p + s3_p + s4_p + s5_p - wrench_body;
 
-    if (H13) { *H13 = -d_wrench_body_d_platform_wrench; }
+    Vector6 stress_error = s0_p + s1_p + s2_p + s3_p + s4_p + s5_p - platform_wrench;
 
-    if (H14) { 
-        *H14 = d_s0_p_d_pp + d_s1_p_d_pp + d_s2_p_d_pp + d_s3_p_d_pp + d_s4_p_d_pp + d_s5_p_d_pp - d_wrench_body_d_platform_pose;
+    if (H13) { *H13 = -Matrix6::Identity(); }
+
+    if (H14) {
+        *H14 = d_s0_p_d_pp + d_s1_p_d_pp + d_s2_p_d_pp + d_s3_p_d_pp + d_s4_p_d_pp + d_s5_p_d_pp;
     }
 
     return stress_error;

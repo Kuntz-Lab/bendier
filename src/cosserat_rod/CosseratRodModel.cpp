@@ -123,14 +123,12 @@ NonlinearFactorGraph CosseratRodModel::build_graph() const
     graph.add(BoundaryStressFactor(
         stress_keys_.back(),
         wrench_keys_.back(),
-        pose_keys_.back(),
         stress_noise_,
         /* is_base = */ false));
 
     graph.add(BoundaryStressFactor(
         stress_keys_.front(),
         wrench_keys_.front(),
-        pose_keys_.front(),
         stress_noise_,
         /* is_base = */ true));
 

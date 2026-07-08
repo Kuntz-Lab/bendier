@@ -2,31 +2,46 @@
 
 using namespace gtsam;
 
-Vector6 transform_wrench_adjoint(
+Vector6 transform_wrench_translation(
     const Vector6& w0,
     const Pose3& p0,
     const Pose3& p,
     OptionalJacobian<6, 6> H_w0,
     OptionalJacobian<6, 6> H_p0,
-    OptionalJacobian<6, 6> H_p) 
-{   
-    // Get pose p relative to p0
-    Matrix6 d_delta_d_p0, d_delta_d_p;
-    Pose3 delta = p0.between(p, d_delta_d_p0, d_delta_d_p);
-    
-    // Transforming wrench in delta's spatial frame to its body frame
-    // i.e. from  p0  to p based on the above
-    Matrix6 d_w_d_delta, d_w_d_w0;
-    Vector6 w = delta.AdjointTranspose(w0, d_w_d_delta, d_w_d_w0);
+    OptionalJacobian<6, 6> H_p)
+{
+    Matrix36 d_t0_d_p0, d_t1_d_p;
+    Vector3 t0 = p0.translation(d_t0_d_p0);
+    Vector3 t1 = p.translation(d_t1_d_p);
 
-    if (H_w0) { *H_w0 = d_w_d_w0; }
+    Vector3 m0 = w0.head<3>();
+    Vector3 n0 = w0.tail<3>();
 
-    if (H_p0) {
-        *H_p0 = d_w_d_delta * d_delta_d_p0;
+    Vector3 d = t1 - t0;
+    Matrix3 d_skew = skewSymmetric(d);
+    Matrix3 n0_skew = skewSymmetric(n0);
+
+    Vector6 w;
+    w.head<3>() = m0 - d_skew * n0;
+    w.tail<3>() = n0;
+
+    if (H_w0) {
+        H_w0->setZero();
+        H_w0->block<3,3>(0,0) = Matrix3::Identity();
+        H_w0->block<3,3>(0,3) = -d_skew;
+        H_w0->block<3,3>(3,3) = Matrix3::Identity();
     }
 
-    if (H_p) { *H_p = d_w_d_delta * d_delta_d_p; }
-    
+    if (H_p0) {
+        H_p0->setZero();
+        H_p0->block<3,6>(0,0) = -n0_skew * d_t0_d_p0;
+    }
+
+    if (H_p) {
+        H_p->setZero();
+        H_p->block<3,6>(0,0) = n0_skew * d_t1_d_p;
+    }
+
     return w;
 }
 

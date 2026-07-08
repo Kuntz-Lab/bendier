@@ -1,4 +1,5 @@
 #include "CosseratStrainFactor.h"
+#include "utils/WrenchTransforms.h"
 #include <gtsam/base/Matrix.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
 
@@ -57,18 +58,24 @@ static Vector6 get_strain_magnus(
     Matrix6 d_ad1_d_dw, d_ad1_d_w0;
     Vector6 ad1 = Pose3::adjoint(dw, w0, d_ad1_d_dw, d_ad1_d_w0);
 
+    Matrix6 d_ad1_d_w0_total = d_ad1_d_w0 + d_ad1_d_dw * d_dw_d_w0;
+    Matrix6 d_ad1_d_w1_total = d_ad1_d_dw * d_dw_d_w1;
+
     terms[2] = c * ad1;
-    d_terms_d_w0[2] = c * d_ad1_d_w0;
-    d_terms_d_w1[2] = c * d_ad1_d_dw * d_dw_d_w1;
+    d_terms_d_w0[2] = c * d_ad1_d_w0_total;
+    d_terms_d_w1[2] = c * d_ad1_d_w1_total;
 
     // Term 3
     double d = ds * ds / 240.0;
     Matrix6 d_ad2_d_dw, d_ad2_d_ad1;
     Vector6 ad2 = Pose3::adjoint(dw, ad1, d_ad2_d_dw, d_ad2_d_ad1);
 
+    Matrix6 d_ad2_d_w0_total = d_ad2_d_dw * d_dw_d_w0 + d_ad2_d_ad1 * d_ad1_d_w0_total;
+    Matrix6 d_ad2_d_w1_total = d_ad2_d_dw * d_dw_d_w1 + d_ad2_d_ad1 * d_ad1_d_w1_total;
+
     terms[3] = d * ad2;
-    d_terms_d_w0[3] = d * (d_ad2_d_ad1 * d_ad1_d_w0 + d_ad2_d_dw * d_dw_d_w0);
-    d_terms_d_w1[3] = d * d_ad2_d_dw * d_dw_d_w1;
+    d_terms_d_w0[3] = d * d_ad2_d_w0_total;
+    d_terms_d_w1[3] = d * d_ad2_d_w1_total;
 
     // Accumulate only up to requested num_terms
     Vector6 strain = Vector6::Zero();
@@ -96,7 +103,7 @@ Vector CosseratStrainFactor::evaluateError(
     OptionalMatrixType H3, 
     OptionalMatrixType H4) const 
 {
-    // Get delta in of p1 relative to p0
+    // Get delta of p1 relative to p0
     Matrix6 d_delta_d_p0, d_delta_d_p1;
     Pose3 delta = p0.between(p1, d_delta_d_p0, d_delta_d_p1);
 
@@ -104,8 +111,15 @@ Vector CosseratStrainFactor::evaluateError(
     Matrix6 d_twist_d_delta;
     Vector6 twist = Pose3::Logmap(delta, d_twist_d_delta);
     
-    Vector6 w0 = K_inv_ * s0 + nominal_strain_;
-    Vector6 w1 = K_inv_ * s1 + nominal_strain_;
+    // s0, s1 are world-frame, so rotate into each node's own body frame first.
+    Matrix6 d_s0body_d_s0, d_s0body_d_p0;
+    Vector6 s0_body = spatial_to_body_wrench(s0, p0, d_s0body_d_s0, d_s0body_d_p0);
+
+    Matrix6 d_s1body_d_s1, d_s1body_d_p1;
+    Vector6 s1_body = spatial_to_body_wrench(s1, p1, d_s1body_d_s1, d_s1body_d_p1);
+
+    Vector6 w0 = K_inv_ * s0_body + nominal_strain_;
+    Vector6 w1 = K_inv_ * s1_body + nominal_strain_;
 
     Matrix6 d_strain_d_w0, d_strain_d_w1;
     Vector6 strain_pred = get_strain_magnus(
@@ -118,13 +132,19 @@ Vector CosseratStrainFactor::evaluateError(
 
     Vector6 error = strain_pred -  twist / ds_;
 
-    if (H1) { *H1 = -1 / ds_ *d_twist_d_delta * d_delta_d_p0; }
+    if (H1) {
+        *H1 = -1 / ds_ * d_twist_d_delta * d_delta_d_p0
+            + d_strain_d_w0 * K_inv_ * d_s0body_d_p0;
+    }
 
-    if (H2) { *H2 = -1 / ds_ *d_twist_d_delta * d_delta_d_p1; }
+    if (H2) {
+        *H2 = -1 / ds_ * d_twist_d_delta * d_delta_d_p1
+            + d_strain_d_w1 * K_inv_ * d_s1body_d_p1;
+    }
 
-    if (H3) { *H3 = d_strain_d_w0 * K_inv_; }
-    
-    if (H4) { *H4 = d_strain_d_w1 * K_inv_; }
+    if (H3) { *H3 = d_strain_d_w0 * K_inv_ * d_s0body_d_s0; }
+
+    if (H4) { *H4 = d_strain_d_w1 * K_inv_ * d_s1body_d_s1; }
 
     return error;
 }

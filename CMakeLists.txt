@@ -67,6 +67,32 @@ install(DIRECTORY
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
 
+option(BENDIER_BUILD_TESTS "Build C++ unit tests" ON)
+
+if(BENDIER_BUILD_TESTS)
+  find_library(CPPUNITLITE_LIBRARY NAMES CppUnitLite)
+  find_path(CPPUNITLITE_INCLUDE_DIR NAMES CppUnitLite/TestHarness.h)
+
+  if(CPPUNITLITE_LIBRARY AND CPPUNITLITE_INCLUDE_DIR)
+    enable_testing()
+
+    add_executable(bendier_tests tests/JacobianTests.cpp)
+
+    target_include_directories(bendier_tests
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CPPUNITLITE_INCLUDE_DIR}
+        ${GTSAM_INCLUDE_DIR}
+    )
+
+    target_link_libraries(bendier_tests PRIVATE bendier_solvers ${CPPUNITLITE_LIBRARY})
+
+    add_test(NAME bendier_tests COMMAND bendier_tests)
+  else()
+    message(WARNING "CppUnitLite not found; skipping bendier_tests target")
+  endif()
+endif()
+
 if(BENDIER_BUILD_PYTHON)
   set(PYBIND11_FINDPYTHON ON)
   find_package(pybind11 CONFIG REQUIRED)

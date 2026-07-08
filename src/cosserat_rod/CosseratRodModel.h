@@ -10,8 +10,8 @@
 
 struct CosseratRodState {
     Pose3Gaussian pose;
-    Vector6Gaussian stress;
-    Vector6Gaussian wrench;
+    Vector6Gaussian stress;  // internal wrench in spatial frame
+    Vector6Gaussian wrench;  // external wrench in spatial frame
 };
 
 struct CosseratRodMarginals {
