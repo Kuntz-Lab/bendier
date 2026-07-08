@@ -29,6 +29,24 @@ If you use this code, please cite our RAL paper (preprint [here](https://arxiv.o
 }
 ```
 
+> **Note:** This repository is under active development and `main` may diverge from the exact code used to produce the RAL paper results. The paper's version is preserved under its own git tag `RAL`.
+
+## C++ Architecture
+
+We designed the C++ architecture to be modular and extensible, so that new robot models can be added with minimal effort and can be composed out of existing models.
+For example, `ParallelRobotModel` is a composition of `CosseratRodModel` rods with distal platform constraint factors.
+Robot models follow a two-layer model/solver design:
+
+**Model layer** -- internal physics constraints only, no per-solve inputs.
+Each model satisfies the `BendierModel<T>` concept, exposing `build_graph()`, `get_initial_values()`, and `get_marginals()`.
+Models own their GTSAM keys and build the internal factors that encode physical constraints/behavior (e.g., cosserat equations, tendon-routing wrenches, platform coupling, etc.).
+On its own, a model's `build_graph()` output is generally under-constrained -- it is unaware of per-solve actuation inputs or measurements, which are the solver's responsibility.
+
+**Solver layer** -- per-solve priors and measurements.
+`SolverBase<ModelType>` is templated on the model type, owns `model_`, and provides a protected, timed `run_solve()` pipeline.
+Concrete solvers (e.g. `CosseratRodSolver`) push any per-call geometry (rod lengths, insertion depths, nominal strain) into the model first, build their own priors/measurements as a `gtsam::NonlinearFactorGraph` in `solve()`, then pass that graph to `run_solve()`, which calls `model_.build_graph()` to add the physics factors and finally runs the GTSAM optimizer on the overall graph.
+This is also where a model becomes well-posed: the solver must constrain every degree of freedom the model leaves free (e.g. a rigid-body pose anchor, a boundary wrench/tip load, actuation inputs).
+
 ## Supported Robot Models
 
 <table align="center">
@@ -48,26 +66,23 @@ If you use this code, please cite our RAL paper (preprint [here](https://arxiv.o
 </tr>
 </table>
 
-| Model | Solver class | Description |
+### Model classes
+
+| Model class | Description |
+|---|---|
+| `CosseratRodModel` | Single elastic rod discretized into `num_nodes` nodes along its arclength. Each node carries a pose, internal wrench (world frame), and optionally an external wrench (world frame) variable. Variables are physically constrained by the discrete Cosserat rod equations. |
+| `TendonRobotModel` | A `CosseratRodModel` backbone with tendon-routing discs and tendon tensions variables. Internal physics factors enforce wrench balance equilibrium at each routing disc, given hole locations. Supports optional external wrenches at each node. Note that `num_tendons` is confiugurable at construction. |
+| `ParallelRobotModel` | Several `CosseratRodModel` rods connected to a shared platform. Internal physics factors enforce the overall platform wrench balance (including external wrenches), as well as the known offsets between the rod tips and the platform. Note that `num_rods` is configurable at construction. |
+
+### Example Solvers
+
+Each solver wraps a model with a matching set of per-solve priors/measurements, and is the entry point used by the scripts under `python/scripts/` (see [Running Demo Scripts](#running-demo-scripts)).
+
+| Solver class | Always added | Optional, pass to `solve()` |
 |---|---|---|
-| Cosserat rod | `CosseratRodSolver` | Single elastic rod; supports tip wrench and tip pose priors |
-| Tendon-driven robot | `TendonRobotSolver` | Tendon-actuated rod with disc routing; supports actuation and tip wrench priors |
-| Parallel robot | `ParallelRobotSolver` | Six-rod Stewart-style parallel robot; supports actuation and tip wrench priors |
-
-## C++ Architecture
-
-We have desiged the C++ architecture to be modular and extensible, so that new robot models can be added with minimal effort, and can be composed out of existing models.
-For example, the `ParallelRobotModel` is a composition of six `CosseratRodModel` instances, with distal platform constraint factors.
-Continuum robots follow a two-layer model/solver design:
-
-**Model layer**:
-Each model satisfies the `BendierModel<T>` concept, exposing `build_graph()`, `get_initial_values()`, and `get_marginals()`. 
-Models own their GTSAM keys and build their own internal physics factors but are unaware of actuation priors or measurements. 
-Those are the solver's responsibility.
-
-**Solver layer**:
-`SolverBase<ModelType>` is templated on the model type, owns `model_`, and provides a protected and timed `run_solve()` pipeline. 
-Concrete solvers (e.g. `CosseratRodSolver`) push any per-call geometry (rod lengths, insertion depths, nominal strain) into the model first, build their own measurement priors as a `gtsam::NonlinearFactorGraph` in `solve()`, then pass that graph to `run_solve()`, which calls `model_.build_graph()` to add the physics factors, and finally runs the GTSAM optimizer.
+| `CosseratRodSolver` | Fixed base pose prior at node 0. | Tip wrench prior, tip pose prior, and nominal rod strain (defaults to straight rod). |
+| `TendonRobotSolver` | Tendon tension prior; a tip wrench prior is always added, defaulting to a small near-zero prior if you don't supply one. | An explicit tip wrench prior (overrides the default); a tip position measurement. |
+| `ParallelRobotSolver` | Per-solve rod lengths (actuator commands) and a platform wrench prior. | Per-rod actuation force measurements, for tip force estimation. |
 
 # Building
 
