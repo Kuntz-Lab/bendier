@@ -1,7 +1,9 @@
+import time
+
 import numpy as np
 
 import bendier
-from bendier.plotting.parallel_robot_plotter import ParallelRobotPlotter
+from bendier.viser_plotting import ViserParallelRobotPlotter
 
 from config import get_config, platform_z_offset
 
@@ -11,14 +13,10 @@ def main():
 
     solver = bendier.ParallelRobotSolver(get_config())
 
-    plotter = ParallelRobotPlotter(
-        save_movie="output/videos/parallel_robot_simple.mp4",
+    plotter = ViserParallelRobotPlotter(
         plot_rod_wrenches=False,
         plot_tip_force=True,
         platform_z_offset=platform_z_offset,
-        camera_azimuth=-60,
-        camera_distance=2.7,
-        camera_focal_point=np.array([0, 0, 0.5]),
     )
 
     wrench_cov = 1.0e-6 * np.eye(6)
@@ -44,6 +42,7 @@ def main():
         )
 
         plotter.update(solution)
+        time.sleep(dt)
 
         progress = 100.0 * t / max(1, sim_time - dt)
         print(f"Progress: {progress:5.1f}%", end="\r")

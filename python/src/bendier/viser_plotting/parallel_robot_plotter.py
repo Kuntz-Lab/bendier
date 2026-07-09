@@ -8,6 +8,7 @@ ParallelRobotPlotter's constructor options and method names.
 import itertools
 
 import numpy as np
+import viser
 
 from . import utils
 from .cosserat_rod_plotter import ViserCosseratRodMeshManager
@@ -18,11 +19,15 @@ ROD_COLORS = [
 ]
 PLATFORM_SIDES = 24
 PLATFORM_LEG_SIDES = 8
+# Bigger than the tendon robot's -- the parallel robot's platform/rod scale
+# is tens of centimeters rather than millimeters.
+TIP_FORCE_ARROW_SHAFT_RADIUS = 0.006
 
 
 class ViserParallelRobotPlotter:
     def __init__(self,
-                 server,
+                 server=None,
+                 port=8080,
                  platform_z_offset=0.0,
                  plot_rod_wrenches=True,
                  plot_tip_force=True,
@@ -30,6 +35,9 @@ class ViserParallelRobotPlotter:
                  plot_backbone_frames=False,
                  plot_backbone_ellipsoids=True):
 
+        if server is None:
+            server = viser.ViserServer(port=port)
+            print("Open the URL above in a browser to watch.")
         self.server = server
         utils.setup_default_lighting(server)
 
@@ -50,11 +58,9 @@ class ViserParallelRobotPlotter:
         self.platform_ellipsoid = None
         self.tip_force_ellipsoid = None
 
-        base_vertices = utils.disc_vertices([np.eye(4)], 0.2, 0.01, PLATFORM_SIDES)
-        base_faces = utils.disc_faces(1, PLATFORM_SIDES)
-        self.server.scene.add_mesh_simple(
-            "/base_plate", vertices=base_vertices, faces=base_faces,
-            color=utils.SILVER, flat_shading=True, side="double", opacity=0.5)
+        utils.add_disc(
+            self.server.scene, "/base_plate", np.eye(4), 0.2, 0.01, utils.SILVER,
+            opacity=0.5, radial_segments=PLATFORM_SIDES, material="toon5")
 
     def _ensure_rod_managers(self, num_rods):
         if self.rod_managers is not None:
@@ -92,29 +98,23 @@ class ViserParallelRobotPlotter:
         plate_pose = pose.copy()
         plate_pose[:3, 3] = p + local_z * self.platform_z_offset
 
-        vertices = utils.disc_vertices([plate_pose], 0.15, 0.005, PLATFORM_SIDES)
         if self.platform_mesh is None:
-            faces = utils.disc_faces(1, PLATFORM_SIDES)
-            self.platform_mesh = self.server.scene.add_mesh_simple(
-                "/platform/plate", vertices=vertices, faces=faces,
-                color=utils.SILVER, flat_shading=True, side="double", opacity=0.85)
-            self.platform_mesh.cast_shadow = True
-            self.platform_mesh.receive_shadow = True
+            self.platform_mesh = utils.add_disc(
+                self.server.scene, "/platform/plate", plate_pose, 0.15, 0.005, utils.SILVER,
+                opacity=0.85, radial_segments=PLATFORM_SIDES, material="toon5")
         else:
-            self.platform_mesh.vertices = vertices
+            utils.update_disc(self.platform_mesh, plate_pose)
 
         # Thin leg connecting the tracked reference frame down to the plate.
         leg_pose = pose.copy()
         leg_pose[:3, 3] = p + local_z * (self.platform_z_offset / 2.0)
-        leg_vertices = utils.disc_vertices(
-            [leg_pose], 0.005, abs(self.platform_z_offset) / 2.0, PLATFORM_LEG_SIDES)
         if self.platform_leg_mesh is None:
-            leg_faces = utils.disc_faces(1, PLATFORM_LEG_SIDES)
-            self.platform_leg_mesh = self.server.scene.add_mesh_simple(
-                "/platform/leg", vertices=leg_vertices, faces=leg_faces,
-                color=utils.SILVER, flat_shading=True, side="double")
+            self.platform_leg_mesh = utils.add_disc(
+                self.server.scene, "/platform/leg", leg_pose,
+                0.005, abs(self.platform_z_offset) / 2.0, utils.SILVER,
+                radial_segments=PLATFORM_LEG_SIDES, material="toon5")
         else:
-            self.platform_leg_mesh.vertices = leg_vertices
+            utils.update_disc(self.platform_leg_mesh, leg_pose)
 
         if self.platform_joint is None:
             self.platform_joint = self.server.scene.add_icosphere(
@@ -137,8 +137,9 @@ class ViserParallelRobotPlotter:
         f = solution.platform_wrench.mean[3:]
         cov = solution.platform_wrench.cov[3:, 3:]
 
-        utils.set_vector_line(
-            self.server.scene, "/platform_tip_force", p, f, self.force_scale, color=utils.DARK_ORCHID)
+        utils.set_vector_arrow(
+            self.server.scene, "/platform_tip_force", p, f, self.force_scale, color=utils.DARK_ORCHID,
+            shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
 
         if self.tip_force_ellipsoid is None:
             self.tip_force_ellipsoid = utils.add_ellipsoid(
@@ -149,9 +150,9 @@ class ViserParallelRobotPlotter:
                 self.tip_force_ellipsoid, p + f * self.force_scale, cov, scale=self.force_scale)
 
         if tip_force_gt is not None:
-            utils.set_vector_line(
+            utils.set_vector_arrow(
                 self.server.scene, "/platform_tip_force_gt", p, tip_force_gt,
-                self.force_scale, color=utils.GREEN)
+                self.force_scale, color=utils.GREEN, shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
 
     def update(self, solution, tip_force_gt=None):
         self._ensure_rod_managers(len(solution.marginals.rods))

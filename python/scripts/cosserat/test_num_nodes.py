@@ -1,8 +1,10 @@
+import time
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 import bendier
-from bendier.plotting.cosserat_rod_plotter import CosseratRodPlotter
+from bendier.viser_plotting import ViserCosseratRodPlotter
 from bendier.plotting.utils import setup_plt
 
 from config import get_config, DEFAULTS
@@ -31,16 +33,12 @@ def simulate_trajectory(num_nodes=0, num_magnus_terms=0, use_baseline=False, sim
     plot = False  # unfortunately, plotting slows down the simulation significantly so wont get good performance 
 
     if plot:
-        plotter = CosseratRodPlotter(
+        plotter = ViserCosseratRodPlotter(
             plot_wrenches=True,
             plot_base_wrench=False,
             plot_backbone_ellipsoids=False,
             moment_scale=0.07,
-            save_movie='output/videos/cosserat_num_nodes.mp4',
-            plot_backbone_frames=True, 
-            camera_azimuth=60, 
-            camera_distance=1.5, 
-            camera_focal_point=np.array([0, 0, 0.25]))
+            plot_backbone_frames=True)
     
     dt = 1.0 / frame_rate
     num_steps = int(sim_time * frame_rate)
@@ -66,7 +64,8 @@ def simulate_trajectory(num_nodes=0, num_magnus_terms=0, use_baseline=False, sim
         tip_poses.append(pose)
 
         if plot:
-            plotter.update(solution) 
+            plotter.update(solution)
+            time.sleep(dt)
 
         progress = 100.0 * step / num_steps
         print(f"num_nodes: {num_nodes}, num_magnus_terms: {num_magnus_terms}, Progress: {progress:5.1f}%", end="\r")

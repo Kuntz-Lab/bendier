@@ -83,42 +83,25 @@ def tube_vertices(poses, radius: float, sides: int) -> np.ndarray:
     return rings.reshape(-1, 3).astype(np.float32)
 
 
-# --- Procedural disc/plate (short cylinder) meshes ----------------------
+# --- Discs / plates ---------------------------------------------------
 #
-# Same once-computed-topology / cheap-vertex-update split as the tube.
-# Used both for tendon-routing discs and for flat end plates.
+# These are genuine straight cylinders (fixed radius/height, one pose each)
+# -- viser's native add_cylinder (height along local z, matching our pose
+# convention exactly) handles this directly, so there's no reason to hand-
+# build vertex/face buffers the way the tube does. add_cylinder / the
+# returned CylinderHandle also cover normals, material, and shading
+# correctly on their own. Only the tube backbone still needs custom mesh
+# code, since it bends/twists along the rod and has no matching primitive.
 
-def _single_disc_local_faces(sides: int) -> np.ndarray:
-    top_ring, bot_ring = np.arange(sides), np.arange(sides, 2 * sides)
-    top_center, bot_center = 2 * sides, 2 * sides + 1
-    faces = []
-    for j in range(sides):
-        j2 = (j + 1) % sides
-        faces.append((top_ring[j], top_ring[j2], bot_ring[j2]))
-        faces.append((top_ring[j], bot_ring[j2], bot_ring[j]))
-        faces.append((top_center, top_ring[j], top_ring[j2]))
-        faces.append((bot_center, bot_ring[j2], bot_ring[j]))
-    return np.array(faces, dtype=np.uint32)
+def add_disc(scene, name, pose, radius, half_width, color, **kwargs):
+    return scene.add_cylinder(
+        name, radius=radius, height=2 * half_width, color=color,
+        position=pose[:3, 3], wxyz=pose_to_wxyz(pose), **kwargs)
 
 
-def disc_faces(num_discs: int, sides: int) -> np.ndarray:
-    local = _single_disc_local_faces(sides)
-    verts_per_disc = 2 * sides + 2
-    return np.vstack([local + i * verts_per_disc for i in range(num_discs)]).astype(np.uint32)
-
-
-def disc_vertices(disc_poses, radius: float, half_width: float, sides: int) -> np.ndarray:
-    angles = np.linspace(0, 2 * np.pi, sides, endpoint=False)
-    cos_a, sin_a = np.cos(angles)[:, None], np.sin(angles)[:, None]
-
-    rings = []
-    for T in disc_poses:
-        p, x, y, z = T[:3, 3], T[:3, 0], T[:3, 1], T[:3, 2]
-        top_center, bot_center = p + half_width * z, p - half_width * z
-        top_ring = top_center[None, :] + radius * cos_a * x[None, :] + radius * sin_a * y[None, :]
-        bot_ring = bot_center[None, :] + radius * cos_a * x[None, :] + radius * sin_a * y[None, :]
-        rings.append(np.vstack([top_ring, bot_ring, top_center[None, :], bot_center[None, :]]))
-    return np.vstack(rings).astype(np.float32)
+def update_disc(handle, pose):
+    handle.position = pose[:3, 3]
+    handle.wxyz = pose_to_wxyz(pose)
 
 
 # --- Covariance ellipsoids ------------------------------------------------
@@ -152,13 +135,18 @@ def update_ellipsoid(handle, position, cov, scale=1.0, num_sigma=2.0):
     handle.scale = radii
 
 
-# --- Vector "arrows" (force/moment) --------------------------------------
+# --- Vector arrows (force/moment) -----------------------------------------
 #
-# Plain line segments rather than proper cone-tipped arrows -- simpler and
-# good enough to show direction/magnitude; re-added by name each solve
-# since a line's whole payload is just its two endpoints.
+# viser's native add_arrows (cone-tipped, same points=(N,2,3) convention as
+# add_line_segments) -- re-added by name each solve, same as everywhere else
+# that doesn't bother with in-place updates for cheap-payload scene nodes.
+# Shaft/head thickness is a fixed size the caller picks (appropriate to that
+# robot's own scale), not derived from the vector's length -- scaling
+# thickness with magnitude made bigger forces render as fatter arrows, which
+# reads as wrong (thickness isn't the thing encoding magnitude, length is).
 
-def set_vector_line(scene, name, origin, vec, scale, color, line_width=4.0):
+def set_vector_arrow(scene, name, origin, vec, scale, color, shaft_radius=0.004):
     end = origin + vec * scale
-    return scene.add_line_segments(
-        name, points=np.array([[origin, end]]), colors=color, line_width=line_width)
+    return scene.add_arrows(
+        name, points=np.array([[origin, end]]), colors=color,
+        shaft_radius=shaft_radius, head_radius=shaft_radius * 3.0, head_length=shaft_radius * 6.0)

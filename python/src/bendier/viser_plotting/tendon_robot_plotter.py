@@ -8,6 +8,7 @@ TendonRobotPlotter's constructor options and method names.
 import itertools
 
 import numpy as np
+import viser
 
 from . import utils
 from .cosserat_rod_plotter import ViserCosseratRodMeshManager
@@ -16,18 +17,25 @@ TENDON_COLORS = [
     (220, 20, 60), (34, 139, 34), (65, 105, 225),
     (186, 85, 211), (218, 165, 32), (255, 20, 147),
 ]
-DISC_SIDES = 16
+DISC_SIDES = 32
+# Matches the rod_manager's backbone_radius=0.001 below (see
+# ViserCosseratRodMeshManager's own arrow_shaft_radius default derivation).
+TIP_FORCE_ARROW_SHAFT_RADIUS = 0.0008
 
 
 class ViserTendonRobotPlotter:
     def __init__(self,
-                 server,
+                 server=None,
+                 port=8080,
                  plot_rod_wrenches=False,
                  plot_tip_force=True,
                  plot_base_wrenches=False,
                  plot_backbone_frames=False,
                  plot_backbone_ellipsoids=True):
 
+        if server is None:
+            server = viser.ViserServer(port=port)
+            print("Open the URL above in a browser to watch.")
         self.server = server
         utils.setup_default_lighting(server)
 
@@ -46,7 +54,7 @@ class ViserTendonRobotPlotter:
             moment_scale=0.2,
         )
 
-        self.disc_mesh = None
+        self.disc_handles = None
         self.tip_force_ellipsoid = None
 
     def update_tendons(self, solution):
@@ -80,16 +88,16 @@ class ViserTendonRobotPlotter:
         radius = 1.3 * tendon_config.routing_radius
         half_width = 0.15 * tendon_config.routing_radius
 
-        vertices = utils.disc_vertices(disc_poses, radius, half_width, DISC_SIDES)
-        if self.disc_mesh is None:
-            faces = utils.disc_faces(len(disc_poses), DISC_SIDES)
-            self.disc_mesh = self.server.scene.add_mesh_simple(
-                "/rod/discs", vertices=vertices, faces=faces,
-                color=utils.CORNFLOWER_BLUE, opacity=0.7, flat_shading=True, side="double")
-            self.disc_mesh.cast_shadow = True
-            self.disc_mesh.receive_shadow = True
+        if self.disc_handles is None:
+            self.disc_handles = [
+                utils.add_disc(
+                    self.server.scene, f"/rod/discs/{i}", pose, radius, half_width,
+                    utils.CORNFLOWER_BLUE, opacity=0.7, radial_segments=DISC_SIDES, material="toon5")
+                for i, pose in enumerate(disc_poses)
+            ]
         else:
-            self.disc_mesh.vertices = vertices
+            for handle, pose in zip(self.disc_handles, disc_poses):
+                utils.update_disc(handle, pose)
 
     def update_tip_force(self, solution, tip_force_gt=None):
         if not self.plot_tip_force:
@@ -101,8 +109,9 @@ class ViserTendonRobotPlotter:
         f = solution.marginals.external_wrenches[-1].mean[3:]
         cov = solution.marginals.external_wrenches[-1].cov[3:, 3:]
 
-        utils.set_vector_line(
-            self.server.scene, "/rod/tip_force", p, f, force_scale, color=utils.DARK_ORCHID)
+        utils.set_vector_arrow(
+            self.server.scene, "/rod/tip_force", p, f, force_scale, color=utils.DARK_ORCHID,
+            shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
 
         if self.tip_force_ellipsoid is None:
             self.tip_force_ellipsoid = utils.add_ellipsoid(
@@ -113,8 +122,9 @@ class ViserTendonRobotPlotter:
                 self.tip_force_ellipsoid, p + f * force_scale, cov, scale=force_scale)
 
         if tip_force_gt is not None:
-            utils.set_vector_line(
-                self.server.scene, "/rod/tip_force_gt", p, tip_force_gt, force_scale, color=utils.GREEN)
+            utils.set_vector_arrow(
+                self.server.scene, "/rod/tip_force_gt", p, tip_force_gt, force_scale, color=utils.GREEN,
+                shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
 
     def update_p_desired(self, p):
         self.server.scene.add_icosphere(

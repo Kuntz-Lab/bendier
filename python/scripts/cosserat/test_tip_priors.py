@@ -1,9 +1,11 @@
 import argparse
+import time
+
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 import bendier
-from bendier.plotting.cosserat_rod_plotter import CosseratRodPlotter
+from bendier.viser_plotting import ViserCosseratRodPlotter
 from config import get_config
 
 
@@ -86,14 +88,11 @@ def main(args):
     config = get_config()
 
     solver = bendier.CosseratRodSolver(config)
-    plotter = CosseratRodPlotter(
-        save_movie=f"output/videos/cosserat_priors_{args.tip_prior}.mp4",
+
+    plotter = ViserCosseratRodPlotter(
         plot_wrenches=args.tip_prior != "pose",
         plot_backbone_frames=True,
-        plot_tip_plate=args.tip_prior == "pose",
-        camera_azimuth=60,
-        camera_distance=1.5,
-        camera_focal_point=np.array([0, 0, 0.25]))
+        plot_tip_plate=args.tip_prior == "pose")
 
     frame_rate = 30.0
     dt = 1.0 / frame_rate
@@ -105,6 +104,7 @@ def main(args):
 
         solution = solver.solve(*prior_getter(t), None)
         plotter.update(solution)
+        time.sleep(dt)
 
         progress = 100.0 * step / num_steps
         print(f"Progress: {progress:5.1f}%", end="\r")

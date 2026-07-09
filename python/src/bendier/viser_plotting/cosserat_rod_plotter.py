@@ -8,10 +8,13 @@ reuses CosseratRodMeshManager.
 """
 
 import numpy as np
+import viser
 
 from . import utils
 
 BACKBONE_SIDES = 12
+END_PLATE_SIDES = 32
+END_PLATE_MATERIAL = "toon5"
 
 
 class ViserCosseratRodMeshManager:
@@ -31,7 +34,8 @@ class ViserCosseratRodMeshManager:
                  base_plate_size=0.1,
                  cartesian_frame_scale=0.01,
                  rod_color=utils.ULTRAMARINE,
-                 rod_opacity=0.8):
+                 rod_opacity=0.8,
+                 arrow_shaft_radius=None):
 
         self.scene = scene
         self.prefix = prefix
@@ -51,6 +55,10 @@ class ViserCosseratRodMeshManager:
         self.force_scale = force_scale
         self.base_plate_size = base_plate_size
         self.cartesian_frame_scale = cartesian_frame_scale
+        # Sized off the rod's own thickness by default, so arrows look
+        # proportionate to the rod without a separate knob to tune per robot.
+        self.arrow_shaft_radius = (
+            arrow_shaft_radius if arrow_shaft_radius is not None else backbone_radius * 0.8)
 
         self.backbone_mesh = None
         self.base_plate_mesh = None
@@ -59,36 +67,33 @@ class ViserCosseratRodMeshManager:
         self.wrench_moment_ellipsoid_handles = []
         self.wrench_force_ellipsoid_handles = []
 
-    def _end_plate_faces(self):
-        return utils.disc_faces(1, BACKBONE_SIDES)
-
-    def _end_plate_vertices(self, pose):
-        half_thick = (self.base_plate_size / 10.0) / 2.0
-        return utils.disc_vertices([pose], self.base_plate_size / 2.0, half_thick, BACKBONE_SIDES)
-
     def update_base_plate(self, solution):
         if not self.plot_base_plate:
             return
 
-        vertices = self._end_plate_vertices(solution.states[0].pose.mean)
+        pose = solution.states[0].pose.mean
+        half_thick = (self.base_plate_size / 10.0) / 2.0
         if self.base_plate_mesh is None:
-            self.base_plate_mesh = self.scene.add_mesh_simple(
-                f"{self.prefix}/base_plate", vertices=vertices, faces=self._end_plate_faces(),
-                color=utils.SILVER, flat_shading=True, side="double")
+            self.base_plate_mesh = utils.add_disc(
+                self.scene, f"{self.prefix}/base_plate", pose,
+                self.base_plate_size / 2.0, half_thick, utils.SILVER,
+                radial_segments=END_PLATE_SIDES, material=END_PLATE_MATERIAL)
         else:
-            self.base_plate_mesh.vertices = vertices
+            utils.update_disc(self.base_plate_mesh, pose)
 
     def update_tip_plate(self, solution):
         if not self.plot_tip_plate:
             return
 
-        vertices = self._end_plate_vertices(solution.states[-1].pose.mean)
+        pose = solution.states[-1].pose.mean
+        half_thick = (self.base_plate_size / 10.0) / 2.0
         if self.tip_plate_mesh is None:
-            self.tip_plate_mesh = self.scene.add_mesh_simple(
-                f"{self.prefix}/tip_plate", vertices=vertices, faces=self._end_plate_faces(),
-                color=utils.SILVER, flat_shading=True, side="double")
+            self.tip_plate_mesh = utils.add_disc(
+                self.scene, f"{self.prefix}/tip_plate", pose,
+                self.base_plate_size / 2.0, half_thick, utils.SILVER,
+                radial_segments=END_PLATE_SIDES, material=END_PLATE_MATERIAL)
         else:
-            self.tip_plate_mesh.vertices = vertices
+            utils.update_disc(self.tip_plate_mesh, pose)
 
     def update_rod_tube(self, solution):
         poses = [state.pose.mean for state in solution.states]
@@ -99,7 +104,7 @@ class ViserCosseratRodMeshManager:
             self.backbone_mesh = self.scene.add_mesh_simple(
                 f"{self.prefix}/backbone", vertices=vertices, faces=faces,
                 color=self.rod_color, opacity=self.rod_opacity,
-                flat_shading=False, side="double")
+                flat_shading=False, side="front", material="toon5")
             self.backbone_mesh.cast_shadow = True
             self.backbone_mesh.receive_shadow = True
         else:
@@ -157,12 +162,14 @@ class ViserCosseratRodMeshManager:
             moment_mean, force_mean = state.wrench.mean[:3], state.wrench.mean[3:]
             moment_cov, force_cov = state.wrench.cov[:3, :3], state.wrench.cov[3:, 3:]
 
-            utils.set_vector_line(
+            utils.set_vector_arrow(
                 self.scene, f"{self.prefix}/wrenches/{i}/moment_arrow",
-                p, moment_mean, self.moment_scale, color=utils.DEEP_PINK)
-            utils.set_vector_line(
+                p, moment_mean, self.moment_scale, color=utils.DEEP_PINK,
+                shaft_radius=self.arrow_shaft_radius)
+            utils.set_vector_arrow(
                 self.scene, f"{self.prefix}/wrenches/{i}/force_arrow",
-                p, force_mean, self.force_scale, color=utils.DARK_ORCHID)
+                p, force_mean, self.force_scale, color=utils.DARK_ORCHID,
+                shaft_radius=self.arrow_shaft_radius)
 
             utils.update_ellipsoid(
                 self.wrench_moment_ellipsoid_handles[i],
@@ -182,7 +189,8 @@ class ViserCosseratRodMeshManager:
 
 class ViserCosseratRodPlotter:
     def __init__(self,
-                 server,
+                 server=None,
+                 port=8080,
                  plot_base_plate=True,
                  plot_tip_plate=False,
                  plot_wrenches=True,
@@ -195,6 +203,12 @@ class ViserCosseratRodPlotter:
                  base_plate_size=0.1,
                  cartesian_frame_scale=0.03):
 
+        # Owns its own server if one isn't given, the same way a pyvista
+        # plotter owns its own window -- lets standalone scripts construct a
+        # plotter directly, with no separate viser import/setup of their own.
+        if server is None:
+            server = viser.ViserServer(port=port)
+            print("Open the URL above in a browser to watch.")
         self.server = server
         utils.setup_default_lighting(server)
 

@@ -1,12 +1,13 @@
 import os
 import sys
+import time
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 
 import bendier
-from bendier.plotting.parallel_robot_plotter import ParallelRobotPlotter
+from bendier.viser_plotting import ViserParallelRobotPlotter
 from bendier.plotting.utils import setup_plt
 
 from config import platform_z_offset, get_config, DEFAULTS
@@ -59,26 +60,20 @@ def run_sim(
 
     # Prior solves the robot with no measurements but with big force prior
     solver_prior = bendier.ParallelRobotSolver(config)
-    plotter_prior = ParallelRobotPlotter(
+    plotter_prior = ViserParallelRobotPlotter(
+        port=8080,
         plot_rod_wrenches=False,
         plot_tip_force=False,
-        save_movie="output/videos/parallel_robot_prior.mp4",
         platform_z_offset=platform_z_offset,
-        camera_azimuth=-60,
-        camera_distance=2.7,
-        camera_focal_point=np.array([0, 0, 0.5])
     )
 
     # The actual solver that solves given measurements
     solver_post = bendier.ParallelRobotSolver(config)
-    plotter_post = ParallelRobotPlotter(
+    plotter_post = ViserParallelRobotPlotter(
+        port=8081,
         plot_rod_wrenches=False,
         plot_tip_force=True,
-        save_movie="output/videos/parallel_robot_post.mp4",
         platform_z_offset=platform_z_offset,
-        camera_azimuth=-60,
-        camera_distance=2.7,
-        camera_focal_point=np.array([0, 0, 0.5])
     )
 
     # Seperate solver just for getting jacobian, dont want to mess up warm starts
@@ -172,6 +167,7 @@ def run_sim(
         if plot:
             plotter_prior.update(solution_prior)
             plotter_post.update(solution_post, tip_force_gt=f_gt)
+            time.sleep(dt)
 
         progress = 100.0 * ti / t[-1]
         print(f"Progress: {progress:5.1f}%", end="\r")
