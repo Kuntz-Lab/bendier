@@ -1,14 +1,12 @@
 import os
 import sys
-import time
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 
 import bendier
-from bendier.viser_plotting import ViserParallelRobotPlotter
-from bendier.plotting.utils import setup_plt
+from bendier.visualization import ParallelRobotPlotter, setup_plt, FramePacer
 
 from config import platform_z_offset, get_config, DEFAULTS
 from benchmark import ParallelRobotBaseline
@@ -56,11 +54,11 @@ def run_sim(
 
     # Simulator to generate actuator forces on rods
     solver_sim = bendier.ParallelRobotSolver(config)
-    baseline = ParallelRobotBaseline(DEFAULTS['K_inv'], DEFAULTS['base_end_poses'], DEFAULTS['tip_end_poses'], plot=False)
+    baseline = ParallelRobotBaseline(DEFAULTS['K_inv'], DEFAULTS['base_end_poses'], DEFAULTS['tip_end_poses'])
 
     # Prior solves the robot with no measurements but with big force prior
     solver_prior = bendier.ParallelRobotSolver(config)
-    plotter_prior = ViserParallelRobotPlotter(
+    plotter_prior = ParallelRobotPlotter(
         port=8080,
         plot_rod_wrenches=False,
         plot_tip_force=False,
@@ -69,7 +67,7 @@ def run_sim(
 
     # The actual solver that solves given measurements
     solver_post = bendier.ParallelRobotSolver(config)
-    plotter_post = ViserParallelRobotPlotter(
+    plotter_post = ParallelRobotPlotter(
         port=8081,
         plot_rod_wrenches=False,
         plot_tip_force=True,
@@ -80,6 +78,7 @@ def run_sim(
     solver_jac = bendier.ParallelRobotSolver(config)
 
     dt = 1.0 / frame_rate
+    pacer = FramePacer(dt)
     t = np.arange(0, sim_time, dt)
     rod_lengths_cmd = 0.6 * np.ones(6)
     
@@ -167,7 +166,7 @@ def run_sim(
         if plot:
             plotter_prior.update(solution_prior)
             plotter_post.update(solution_post, tip_force_gt=f_gt)
-            time.sleep(dt)
+            pacer.tick()
 
         progress = 100.0 * ti / t[-1]
         print(f"Progress: {progress:5.1f}%", end="\r")

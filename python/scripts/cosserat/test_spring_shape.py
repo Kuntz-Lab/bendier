@@ -1,9 +1,7 @@
-import time
-
 import numpy as np
 
 import bendier
-from bendier.viser_plotting import ViserCosseratRodPlotter
+from bendier.visualization import CosseratRodPlotter, FramePacer
 from config import get_config
 
 
@@ -32,7 +30,7 @@ def main():
 
     solver = bendier.CosseratRodSolver(config)
 
-    plotter = ViserCosseratRodPlotter(
+    plotter = CosseratRodPlotter(
         plot_base_plate=True,
         base_plate_size=0.05,
         plot_wrenches=True,
@@ -43,6 +41,7 @@ def main():
     dt = 1.0 / frame_rate
     t_final = 20.0
     num_steps = int(t_final / dt)
+    pacer = FramePacer(dt)
 
     nominal_strain = np.zeros(6)
     nominal_strain[5] = 1.0
@@ -54,7 +53,7 @@ def main():
 
         solution = solver.solve(*get_tip_wrench_prior(t), nominal_strain)
         plotter.update(solution)
-        time.sleep(dt)
+        pacer.tick()
 
         progress = 100.0 * step / num_steps
         print(f"Progress: {progress:5.1f}%", end="\r")

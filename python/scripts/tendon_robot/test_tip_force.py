@@ -1,12 +1,9 @@
-import time
-
 import numpy as np
 import matplotlib.pyplot as plt
 
 from bendier import TendonRobotSolver, Vector6Gaussian, VectorXGaussian, Vector3Gaussian
 
-from bendier.viser_plotting import ViserTendonRobotPlotter
-from bendier.plotting.utils import setup_plt
+from bendier.visualization import TendonRobotPlotter, setup_plt, FramePacer
 from config import get_config, SimParams, DEFAULTS
 from utils import generate_waypoint_trajectory, GaussianProcessNoiseModel, cov_to_std
 from benchmark import TendonRobotBaseline
@@ -20,7 +17,7 @@ def run_sim(params, do_baseline, plot):
 
     # A solver to simulate the nominal trajectory of the robot, given open loop tensions
     solver_nominal = TendonRobotSolver(solver_config)
-    plotter_nominal = ViserTendonRobotPlotter(port=8080, plot_tip_force=True)
+    plotter_nominal = TendonRobotPlotter(port=8080, plot_tip_force=True)
 
     # Setup baseline solver (get holes from dummy solution)
     dummy_solution = solver_nominal.solve(VectorXGaussian(np.zeros(4), np.eye(4)), Vector6Gaussian(np.zeros(6), np.eye(6)), None)
@@ -31,10 +28,12 @@ def run_sim(params, do_baseline, plot):
 
     # Solver that does the actual inference using tip pose data
     solver_post = TendonRobotSolver(solver_config)
-    plotter_post = ViserTendonRobotPlotter(port=8081, plot_tip_force=True)
+    plotter_post = TendonRobotPlotter(port=8081, plot_tip_force=True)
 
     # Use a separate solver for these so it doesn't mess up our performance metrics
     solver_jac = TendonRobotSolver(solver_config)
+
+    pacer = FramePacer(1.0 / params.frame_rate)
 
     # Setup Jacobian control
     damping = 1e-2
@@ -123,7 +122,7 @@ def run_sim(params, do_baseline, plot):
         if plot:
             plotter_post.update(solution_post, p_desired=p_goal, tip_force_gt=f_gt)
             plotter_nominal.update(solution_nominal, p_desired=p_goal, tip_force_gt=f_gt)
-            time.sleep(1.0 / params.frame_rate)
+            pacer.tick()
 
         progress = 100.0 * ti / t[-1]
         print(f"Progress: {progress:5.1f}%", end="\r")

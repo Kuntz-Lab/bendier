@@ -1,23 +1,13 @@
-"""viser equivalent of bendier.plotting.cosserat_rod_plotter.
-
-Mirrors the pyvista CosseratRodMeshManager/CosseratRodPlotter split and
-constructor options as closely as viser's primitives allow, so this is the
-one place backbone-tube/wrench/ellipsoid rendering lives -- reused by the
-tendon and parallel-robot viser plotters exactly like the pyvista version
-reuses CosseratRodMeshManager.
-"""
-
 import numpy as np
 import viser
 
 from . import utils
 
-BACKBONE_SIDES = 12
-END_PLATE_SIDES = 32
-END_PLATE_MATERIAL = "toon5"
+BACKBONE_SIDES = 16
+END_PLATE_SIDES = 64
 
 
-class ViserCosseratRodMeshManager:
+class CosseratRodMeshManager:
     def __init__(self,
                  scene,
                  prefix="/rod",
@@ -35,7 +25,8 @@ class ViserCosseratRodMeshManager:
                  cartesian_frame_scale=0.01,
                  rod_color=utils.ULTRAMARINE,
                  rod_opacity=0.8,
-                 arrow_shaft_radius=None):
+                 arrow_shaft_radius=None,
+                 tube_segments_per_interval=6):
 
         self.scene = scene
         self.prefix = prefix
@@ -59,13 +50,20 @@ class ViserCosseratRodMeshManager:
         # proportionate to the rod without a separate knob to tune per robot.
         self.arrow_shaft_radius = (
             arrow_shaft_radius if arrow_shaft_radius is not None else backbone_radius * 0.8)
+        # How many interpolated rings to insert between each pair of actual
+        # solver nodes -- see utils.interpolate_poses. 1 disables it (one
+        # ring per node, the old behavior).
+        self.tube_segments_per_interval = tube_segments_per_interval
 
         self.backbone_mesh = None
         self.base_plate_mesh = None
         self.tip_plate_mesh = None
-        self.backbone_ellipsoid_handles = []
-        self.wrench_moment_ellipsoid_handles = []
-        self.wrench_force_ellipsoid_handles = []
+        self.backbone_ellipsoid_batch = None
+        self.backbone_frames_batch = None
+        self.wrench_moment_ellipsoid_batch = None
+        self.wrench_force_ellipsoid_batch = None
+        self.wrench_moment_arrows_batch = None
+        self.wrench_force_arrows_batch = None
 
     def update_base_plate(self, solution):
         if not self.plot_base_plate:
@@ -77,7 +75,7 @@ class ViserCosseratRodMeshManager:
             self.base_plate_mesh = utils.add_disc(
                 self.scene, f"{self.prefix}/base_plate", pose,
                 self.base_plate_size / 2.0, half_thick, utils.SILVER,
-                radial_segments=END_PLATE_SIDES, material=END_PLATE_MATERIAL)
+                radial_segments=END_PLATE_SIDES)
         else:
             utils.update_disc(self.base_plate_mesh, pose)
 
@@ -91,22 +89,21 @@ class ViserCosseratRodMeshManager:
             self.tip_plate_mesh = utils.add_disc(
                 self.scene, f"{self.prefix}/tip_plate", pose,
                 self.base_plate_size / 2.0, half_thick, utils.SILVER,
-                radial_segments=END_PLATE_SIDES, material=END_PLATE_MATERIAL)
+                radial_segments=END_PLATE_SIDES)
         else:
             utils.update_disc(self.tip_plate_mesh, pose)
 
     def update_rod_tube(self, solution):
         poses = [state.pose.mean for state in solution.states]
-        vertices = utils.tube_vertices(poses, self.backbone_radius, BACKBONE_SIDES)
+        dense_poses = utils.interpolate_poses(poses, self.tube_segments_per_interval)
+        vertices = utils.tube_vertices(dense_poses, self.backbone_radius, BACKBONE_SIDES)
 
         if self.backbone_mesh is None:
-            faces = utils.tube_faces(len(poses), BACKBONE_SIDES)
+            faces = utils.tube_faces(len(dense_poses), BACKBONE_SIDES)
             self.backbone_mesh = self.scene.add_mesh_simple(
                 f"{self.prefix}/backbone", vertices=vertices, faces=faces,
                 color=self.rod_color, opacity=self.rod_opacity,
                 flat_shading=False, side="front", material="toon5")
-            self.backbone_mesh.cast_shadow = True
-            self.backbone_mesh.receive_shadow = True
         else:
             self.backbone_mesh.vertices = vertices
 
@@ -115,31 +112,37 @@ class ViserCosseratRodMeshManager:
             return
 
         states = solution.states[::self.skip_backbone_ellipsoids]
+        positions = np.array([s.pose.mean[:3, 3] for s in states])
+        world_covs = np.array([
+            s.pose.mean[:3, :3] @ s.pose.cov[3:, 3:] @ s.pose.mean[:3, :3].T
+            for s in states
+        ])
 
-        while len(self.backbone_ellipsoid_handles) < len(states):
-            idx = len(self.backbone_ellipsoid_handles)
-            handle = utils.add_ellipsoid(
-                self.scene, f"{self.prefix}/backbone_ellipsoids/{idx}",
-                position=(0, 0, 0), cov=np.eye(3) * 1e-8,
-                color=utils.DEEP_CADMIUM_RED, opacity=0.2)
-            self.backbone_ellipsoid_handles.append(handle)
-
-        for handle, state in zip(self.backbone_ellipsoid_handles, states):
-            pose, cov = state.pose.mean, state.pose.cov
-            R, p = pose[:3, :3], pose[:3, 3]
-            world_cov = R @ (cov[3:, 3:] @ R.T)
-            utils.update_ellipsoid(handle, p, world_cov)
+        if self.backbone_ellipsoid_batch is None:
+            self.backbone_ellipsoid_batch = utils.add_ellipsoid_batch(
+                self.scene, f"{self.prefix}/backbone_ellipsoids",
+                positions, world_covs, color=utils.DEEP_CADMIUM_RED, opacity=0.2)
+        else:
+            utils.update_ellipsoid_batch(self.backbone_ellipsoid_batch, positions, world_covs)
 
     def update_backbone_frames(self, solution):
         if not self.plot_backbone_frames:
             return
 
-        for i, state in enumerate(solution.states):
-            pose = state.pose.mean
-            self.scene.add_frame(
-                f"{self.prefix}/backbone_frames/{i}",
-                position=pose[:3, 3], wxyz=utils.pose_to_wxyz(pose),
+        # One batched scene node for every node's frame, rather than one
+        # add_frame() per node -- viser's own docs call add_frame-in-a-loop
+        # out as the slow path (see add_batched_axes' docstring).
+        poses = np.array([s.pose.mean for s in solution.states])
+        positions = poses[:, :3, 3]
+        wxyzs = utils.pose_batch_to_wxyz(poses)
+
+        if self.backbone_frames_batch is None:
+            self.backbone_frames_batch = self.scene.add_batched_axes(
+                f"{self.prefix}/backbone_frames", batched_wxyzs=wxyzs, batched_positions=positions,
                 axes_length=self.cartesian_frame_scale, axes_radius=self.cartesian_frame_scale * 0.08)
+        else:
+            self.backbone_frames_batch.batched_positions = positions
+            self.backbone_frames_batch.batched_wxyzs = wxyzs
 
     def update_wrenches(self, solution):
         if not self.plot_wrenches:
@@ -147,36 +150,43 @@ class ViserCosseratRodMeshManager:
 
         states = solution.states if self.plot_base_wrench else solution.states[1:]
         states = [s for s in states if s.wrench is not None]
+        if not states:
+            return
 
-        while len(self.wrench_moment_ellipsoid_handles) < len(states):
-            idx = len(self.wrench_moment_ellipsoid_handles)
-            self.wrench_moment_ellipsoid_handles.append(utils.add_ellipsoid(
-                self.scene, f"{self.prefix}/wrenches/{idx}/moment_ellipsoid",
-                position=(0, 0, 0), cov=np.eye(3) * 1e-8, color=utils.CADMIUM_LEMON, opacity=0.4))
-            self.wrench_force_ellipsoid_handles.append(utils.add_ellipsoid(
-                self.scene, f"{self.prefix}/wrenches/{idx}/force_ellipsoid",
-                position=(0, 0, 0), cov=np.eye(3) * 1e-8, color=utils.CADMIUM_LEMON, opacity=0.4))
+        positions = np.array([s.pose.mean[:3, 3] for s in states])
+        moment_means = np.array([s.wrench.mean[:3] for s in states])
+        force_means = np.array([s.wrench.mean[3:] for s in states])
+        moment_covs = np.array([s.wrench.cov[:3, :3] for s in states])
+        force_covs = np.array([s.wrench.cov[3:, 3:] for s in states])
 
-        for i, state in enumerate(states):
-            p = state.pose.mean[:3, 3]
-            moment_mean, force_mean = state.wrench.mean[:3], state.wrench.mean[3:]
-            moment_cov, force_cov = state.wrench.cov[:3, :3], state.wrench.cov[3:, 3:]
+        self.wrench_moment_arrows_batch = utils.set_vector_arrows_batch(
+            self.scene, f"{self.prefix}/wrenches/moment_arrows",
+            positions, moment_means, self.moment_scale, color=utils.DEEP_PINK,
+            shaft_radius=self.arrow_shaft_radius, handle=self.wrench_moment_arrows_batch)
+        self.wrench_force_arrows_batch = utils.set_vector_arrows_batch(
+            self.scene, f"{self.prefix}/wrenches/force_arrows",
+            positions, force_means, self.force_scale, color=utils.DARK_ORCHID,
+            shaft_radius=self.arrow_shaft_radius, handle=self.wrench_force_arrows_batch)
 
-            utils.set_vector_arrow(
-                self.scene, f"{self.prefix}/wrenches/{i}/moment_arrow",
-                p, moment_mean, self.moment_scale, color=utils.DEEP_PINK,
-                shaft_radius=self.arrow_shaft_radius)
-            utils.set_vector_arrow(
-                self.scene, f"{self.prefix}/wrenches/{i}/force_arrow",
-                p, force_mean, self.force_scale, color=utils.DARK_ORCHID,
-                shaft_radius=self.arrow_shaft_radius)
+        moment_ellipsoid_positions = positions + moment_means * self.moment_scale
+        force_ellipsoid_positions = positions + force_means * self.force_scale
 
-            utils.update_ellipsoid(
-                self.wrench_moment_ellipsoid_handles[i],
-                p + moment_mean * self.moment_scale, moment_cov, scale=self.force_scale)
-            utils.update_ellipsoid(
-                self.wrench_force_ellipsoid_handles[i],
-                p + force_mean * self.force_scale, force_cov, scale=self.force_scale)
+        if self.wrench_moment_ellipsoid_batch is None:
+            self.wrench_moment_ellipsoid_batch = utils.add_ellipsoid_batch(
+                self.scene, f"{self.prefix}/wrenches/moment_ellipsoids",
+                moment_ellipsoid_positions, moment_covs,
+                color=utils.CADMIUM_LEMON, opacity=0.4, scale=self.force_scale)
+            self.wrench_force_ellipsoid_batch = utils.add_ellipsoid_batch(
+                self.scene, f"{self.prefix}/wrenches/force_ellipsoids",
+                force_ellipsoid_positions, force_covs,
+                color=utils.CADMIUM_LEMON, opacity=0.4, scale=self.force_scale)
+        else:
+            utils.update_ellipsoid_batch(
+                self.wrench_moment_ellipsoid_batch, moment_ellipsoid_positions, moment_covs,
+                scale=self.force_scale)
+            utils.update_ellipsoid_batch(
+                self.wrench_force_ellipsoid_batch, force_ellipsoid_positions, force_covs,
+                scale=self.force_scale)
 
     def update(self, solution):
         self.update_base_plate(solution)
@@ -187,7 +197,7 @@ class ViserCosseratRodMeshManager:
         self.update_backbone_frames(solution)
 
 
-class ViserCosseratRodPlotter:
+class CosseratRodPlotter:
     def __init__(self,
                  server=None,
                  port=8080,
@@ -212,7 +222,7 @@ class ViserCosseratRodPlotter:
         self.server = server
         utils.setup_default_lighting(server)
 
-        self.mesh_manager = ViserCosseratRodMeshManager(
+        self.mesh_manager = CosseratRodMeshManager(
             server.scene,
             plot_base_plate=plot_base_plate,
             plot_tip_plate=plot_tip_plate,

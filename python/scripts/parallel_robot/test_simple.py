@@ -1,9 +1,7 @@
-import time
-
 import numpy as np
 
 import bendier
-from bendier.viser_plotting import ViserParallelRobotPlotter
+from bendier.visualization import ParallelRobotPlotter, FramePacer
 
 from config import get_config, platform_z_offset
 
@@ -13,7 +11,7 @@ def main():
 
     solver = bendier.ParallelRobotSolver(get_config())
 
-    plotter = ViserParallelRobotPlotter(
+    plotter = ParallelRobotPlotter(
         plot_rod_wrenches=False,
         plot_tip_force=True,
         platform_z_offset=platform_z_offset,
@@ -25,7 +23,8 @@ def main():
     sim_time = 20.0
     frame_rate = 30.0
     dt = 1.0 / frame_rate
-    
+    pacer = FramePacer(dt)
+
     for t in np.arange(0, sim_time, dt):
         rod_lengths = 0.6 * np.ones(6) + np.sin(0.5 * t + np.arange(6)) * 0.08
 
@@ -42,7 +41,7 @@ def main():
         )
 
         plotter.update(solution)
-        time.sleep(dt)
+        pacer.tick()
 
         progress = 100.0 * t / max(1, sim_time - dt)
         print(f"Progress: {progress:5.1f}%", end="\r")

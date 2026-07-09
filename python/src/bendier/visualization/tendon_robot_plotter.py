@@ -1,29 +1,20 @@
-"""viser equivalent of bendier.plotting.tendon_robot_plotter.
-
-Reuses ViserCosseratRodMeshManager for the backbone tube and adds the
-tendon-routing discs and tendon lines on top, mirroring the pyvista
-TendonRobotPlotter's constructor options and method names.
-"""
-
 import itertools
 
 import numpy as np
 import viser
 
 from . import utils
-from .cosserat_rod_plotter import ViserCosseratRodMeshManager
+from .cosserat_rod_plotter import CosseratRodMeshManager
 
 TENDON_COLORS = [
     (220, 20, 60), (34, 139, 34), (65, 105, 225),
     (186, 85, 211), (218, 165, 32), (255, 20, 147),
 ]
 DISC_SIDES = 32
-# Matches the rod_manager's backbone_radius=0.001 below (see
-# ViserCosseratRodMeshManager's own arrow_shaft_radius default derivation).
 TIP_FORCE_ARROW_SHAFT_RADIUS = 0.0008
 
 
-class ViserTendonRobotPlotter:
+class TendonRobotPlotter:
     def __init__(self,
                  server=None,
                  port=8080,
@@ -41,7 +32,7 @@ class ViserTendonRobotPlotter:
 
         self.plot_tip_force = plot_tip_force
 
-        self.rod_manager = ViserCosseratRodMeshManager(
+        self.rod_manager = CosseratRodMeshManager(
             server.scene,
             plot_backbone_ellipsoids=plot_backbone_ellipsoids,
             plot_wrenches=plot_rod_wrenches,
@@ -56,6 +47,8 @@ class ViserTendonRobotPlotter:
 
         self.disc_handles = None
         self.tip_force_ellipsoid = None
+        self.tip_force_arrow_handle = None
+        self.tip_force_gt_arrow_handle = None
 
     def update_tendons(self, solution):
         tendon_config = solution.marginals.tendon_config
@@ -85,18 +78,24 @@ class ViserTendonRobotPlotter:
         states = solution.marginals.rod.states
 
         disc_poses = [states[i].pose.mean for i in disc_pose_idx]
-        radius = 1.3 * tendon_config.routing_radius
-        half_width = 0.15 * tendon_config.routing_radius
+        routing_radius = tendon_config.routing_radius
+        radius = 1.3 * routing_radius
+        half_width = 0.15 * routing_radius
+
+        # Disc 0 sits at the rod base, right where the rod_manager already
+        # draws its own base plate -- skip the cylinder body there to avoid
+        # two overlapping discs z-fighting (pyvista's plotter did the same).
+        cylinder_poses = disc_poses[1:]
 
         if self.disc_handles is None:
             self.disc_handles = [
                 utils.add_disc(
-                    self.server.scene, f"/rod/discs/{i}", pose, radius, half_width,
+                    self.server.scene, f"/rod/discs/{i + 1}", pose, radius, half_width,
                     utils.CORNFLOWER_BLUE, opacity=0.7, radial_segments=DISC_SIDES, material="toon5")
-                for i, pose in enumerate(disc_poses)
+                for i, pose in enumerate(cylinder_poses)
             ]
         else:
-            for handle, pose in zip(self.disc_handles, disc_poses):
+            for handle, pose in zip(self.disc_handles, cylinder_poses):
                 utils.update_disc(handle, pose)
 
     def update_tip_force(self, solution, tip_force_gt=None):
@@ -109,9 +108,9 @@ class ViserTendonRobotPlotter:
         f = solution.marginals.external_wrenches[-1].mean[3:]
         cov = solution.marginals.external_wrenches[-1].cov[3:, 3:]
 
-        utils.set_vector_arrow(
+        self.tip_force_arrow_handle = utils.set_vector_arrow(
             self.server.scene, "/rod/tip_force", p, f, force_scale, color=utils.DARK_ORCHID,
-            shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
+            shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS, handle=self.tip_force_arrow_handle)
 
         if self.tip_force_ellipsoid is None:
             self.tip_force_ellipsoid = utils.add_ellipsoid(
@@ -122,9 +121,9 @@ class ViserTendonRobotPlotter:
                 self.tip_force_ellipsoid, p + f * force_scale, cov, scale=force_scale)
 
         if tip_force_gt is not None:
-            utils.set_vector_arrow(
+            self.tip_force_gt_arrow_handle = utils.set_vector_arrow(
                 self.server.scene, "/rod/tip_force_gt", p, tip_force_gt, force_scale, color=utils.GREEN,
-                shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
+                shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS, handle=self.tip_force_gt_arrow_handle)
 
     def update_p_desired(self, p):
         self.server.scene.add_icosphere(

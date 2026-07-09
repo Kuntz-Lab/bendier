@@ -1,9 +1,7 @@
-import time
-
 import numpy as np
 
 import bendier
-from bendier.viser_plotting import ViserTendonRobotPlotter
+from bendier.visualization import TendonRobotPlotter, FramePacer
 
 from config import get_config
 
@@ -14,8 +12,9 @@ def main():
     sim_time = 20.0
     frame_rate = 30.0
     dt = 1.0 / frame_rate
+    pacer = FramePacer(dt)
 
-    plotter = ViserTendonRobotPlotter()
+    plotter = TendonRobotPlotter()
 
     tensions_cov = (1e-2) ** 2 * np.eye(4)
     tip_wrench_cov = (1e-3) ** 2 * np.eye(6)
@@ -32,7 +31,7 @@ def main():
 
         solution = solver.solve(tensions, tip_wrench, None)
         plotter.update(solution)
-        time.sleep(dt)
+        pacer.tick()
 
     plotter.close()
 

@@ -4,7 +4,7 @@ from scipy.stats import chi2
 
 from bendier import TendonRobotSolver, Vector6Gaussian, VectorXGaussian, Vector3Gaussian
 
-from bendier.plotting.utils import setup_plt
+from bendier.visualization import setup_plt
 from config import get_config, SimParams
 from utils import generate_waypoint_trajectory, GaussianProcessNoiseModel
 

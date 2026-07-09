@@ -1,27 +1,12 @@
-"""Interactive forward-mechanics viewer for a single Cosserat rod.
-
-Drag the tip-wrench sliders in the browser GUI and the rod shape updates
-live. Unlike the tendon/parallel apps, this one exposes the full 6D tip
-wrench (moment + force) with an independent uncertainty sigma per
-component, since a bare rod has no actuation input to focus on instead.
-
-Rendering lives in bendier.viser_plotting.ViserCosseratRodPlotter, shared
-with the tendon and parallel-robot viser apps.
-
-Run with:
-    python python/apps/cosserat_forward_sim.py
-then open the printed http://localhost:8080 URL in a browser.
-"""
-
 import os
 import sys
-import time
+import threading
 
 import numpy as np
 import viser
 
 import bendier
-from bendier.viser_plotting import ViserCosseratRodPlotter
+from bendier.visualization import CosseratRodPlotter
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts", "cosserat"))
 from config import get_config  # noqa: E402
@@ -41,12 +26,33 @@ FORCE_SIGMA_MIN, FORCE_SIGMA_MAX, FORCE_SIGMA_STEP = 0.0001, 0.5, 0.0001
 FORCE_SIGMA_INITIAL = 0.001
 
 
+def format_solve_stats(meta, avg_total_ms):
+    return (
+        f"iter: {meta.iterations}   err: {meta.error:.2e}\n"
+        f"build: {meta.build_time_ms:.2f} ms   opt: {meta.optimize_time_ms:.2f} ms\n"
+        f"marg: {meta.marginalize_time_ms:.2f} ms   extr: {meta.extract_time_ms:.2f} ms\n"
+        f"total: {meta.total_time_ms:.2f} ms   avg: {avg_total_ms:.2f} ms"
+    )
+
+
 class CosseratForwardSimApp:
     def __init__(self, server: viser.ViserServer):
         self.server = server
         self.solver = bendier.CosseratRodSolver(get_config())
-        self.plotter = ViserCosseratRodPlotter(
+        self.plotter = CosseratRodPlotter(
             server, plot_wrenches=True, plot_backbone_ellipsoids=True)
+        # viser dispatches client-driven GUI callbacks on a thread pool, so
+        # rapidly dragging a slider can fire solve_and_update() from
+        # multiple threads at once. The solver isn't safe to call
+        # concurrently on the same instance (confirmed: concurrent solve()
+        # calls corrupt its internal state and crash), so serialize with a
+        # lock. It has to be reentrant: setting a slider's .value from
+        # Python (as _reset_solver does) calls on_update synchronously on
+        # the *same* thread, which would otherwise deadlock against a plain
+        # Lock we're already holding.
+        self._solve_lock = threading.RLock()
+        self._solve_times = []
+        self._suppress_slider_solve = False
 
         self._build_gui()
         self.solve_and_update()
@@ -86,8 +92,11 @@ class CosseratForwardSimApp:
         with server.gui.add_folder("Solution"):
             self.tip_position_readout = server.gui.add_text(
                 "tip position", initial_value="", disabled=True)
-            self.solve_time_readout = server.gui.add_text(
-                "solve time", initial_value="", disabled=True)
+            self.solve_stats_readout = server.gui.add_text(
+                "solve stats", initial_value="", disabled=True)
+            self.status_readout = server.gui.add_text(
+                "status", initial_value="ok", disabled=True)
+            reset_solver = server.gui.add_button("Reset solver")
 
         all_sliders = (
             self.moment_sliders + self.force_sliders
@@ -97,37 +106,84 @@ class CosseratForwardSimApp:
 
         @reset_wrench.on_click
         def _(_):
-            for slider in self.moment_sliders + self.force_sliders:
-                slider.value = 0.0
+            self._set_sliders((s, 0.0) for s in self.moment_sliders + self.force_sliders)
+
+        @reset_solver.on_click
+        def _(_):
+            self._reset_solver()
+
+    def _set_sliders(self, slider_value_pairs):
+        # Sets several sliders as one atomic update: suppresses the
+        # per-slider solve_and_update() cascade that setting .value from
+        # Python would otherwise trigger (each change fires its on_update
+        # callback synchronously), so only one solve happens against the
+        # fully-updated state. Without this, intermediate partially-updated
+        # states get solved individually on the *same* solver instance, and
+        # the optimizer warm-starts each next solve off whatever the
+        # previous (possibly pathological) intermediate one converged to --
+        # confirmed this can leave the solver stuck in a bad local minimum
+        # even once every slider has reached its correct final value.
+        self._suppress_slider_solve = True
+        try:
+            for slider, value in slider_value_pairs:
+                slider.value = value
+        finally:
+            self._suppress_slider_solve = False
+        self.solve_and_update()
+
+    def _reset_solver(self):
+        # Recovers from a solver stuck in a bad/diverged state (failed solve,
+        # or just a pathological slider combination) by throwing the solver
+        # away and starting from a fresh one -- cheaper and more reliable
+        # than trying to repair whatever internal state it's in.
+        with self._solve_lock:
+            self.solver = bendier.CosseratRodSolver(get_config())
+            self._solve_times = []
+            self._set_sliders(
+                [(s, 0.0) for s in self.moment_sliders + self.force_sliders]
+                + [(s, MOMENT_SIGMA_INITIAL) for s in self.moment_sigma_sliders]
+                + [(s, FORCE_SIGMA_INITIAL) for s in self.force_sigma_sliders])
 
     def solve_and_update(self):
-        moment_mean = np.array([s.value for s in self.moment_sliders])
-        force_mean = np.array([s.value for s in self.force_sliders])
-        tip_wrench_mean = np.concatenate([moment_mean, force_mean])
+        with self._solve_lock:
+            if self._suppress_slider_solve:
+                return
 
-        sigma = np.array(
-            [s.value for s in self.moment_sigma_sliders]
-            + [s.value for s in self.force_sigma_sliders])
-        wrench_cov = np.diag(sigma ** 2)
+            moment_mean = np.array([s.value for s in self.moment_sliders])
+            force_mean = np.array([s.value for s in self.force_sliders])
+            tip_wrench_mean = np.concatenate([moment_mean, force_mean])
 
-        tip_wrench = bendier.Vector6Gaussian(tip_wrench_mean, wrench_cov)
+            sigma = np.array(
+                [s.value for s in self.moment_sigma_sliders]
+                + [s.value for s in self.force_sigma_sliders])
+            wrench_cov = np.diag(sigma ** 2)
 
-        solution = self.solver.solve(tip_wrench=tip_wrench)
-        self.plotter.update(solution)
+            tip_wrench = bendier.Vector6Gaussian(tip_wrench_mean, wrench_cov)
 
-        tip_position = solution.marginals.states[-1].pose.mean[:3, 3]
-        self.tip_position_readout.value = (
-            f"[{tip_position[0]:.4f}, {tip_position[1]:.4f}, {tip_position[2]:.4f}] m")
-        self.solve_time_readout.value = f"{solution.meta.total_time_ms:.2f} ms"
+            try:
+                solution = self.solver.solve(tip_wrench=tip_wrench)
+            except Exception as e:
+                print(f"[cosserat_forward_sim] solve() failed, resetting solver: {e}")
+                self.solver = bendier.CosseratRodSolver(get_config())
+                self.status_readout.value = f"solve failed ({type(e).__name__}) -- solver reset"
+                return
+
+            self.plotter.update(solution)
+
+            tip_position = solution.marginals.states[-1].pose.mean[:3, 3]
+            self.tip_position_readout.value = (
+                f"[{tip_position[0]:.4f}, {tip_position[1]:.4f}, {tip_position[2]:.4f}] m")
+            self._solve_times.append(solution.meta.total_time_ms)
+            self.solve_stats_readout.value = format_solve_stats(
+                solution.meta, np.mean(self._solve_times))
+            self.status_readout.value = "ok"
 
 
 def main():
     server = viser.ViserServer()
     print("Open the URL above in a browser, then drag the sliders in the GUI panel.")
     CosseratForwardSimApp(server)
-
-    while True:
-        time.sleep(10.0)
+    server.sleep_forever()
 
 
 if __name__ == "__main__":

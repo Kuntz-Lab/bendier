@@ -22,9 +22,8 @@ dependencies = [
     "numpy==2.3.5",
     "scipy==1.16.3",
     "matplotlib==3.10.7",
-    "pyvista==0.46.4",
-    "vtk==9.5.2",
     "imageio==2.37.3",
     "imageio-ffmpeg==0.6.0",
     "viser==1.0.30",
+    "trimesh==4.12.2",
 ]

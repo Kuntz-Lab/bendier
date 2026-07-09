@@ -12,7 +12,7 @@ This repository demonstrates how to construct factor graph representations of co
 We leverage the sparse nonlinear optimization capabilities of GTSAM for sparse nonlinear optimization.
 The repository supports:
 - `bendier_solvers`: A standalone static C++ library implementing factor graph optimization methods
-- `bendier`: Python package that bundles solver bindings and plotters under one import
+- `bendier`: Python package that bundles solver bindings and `viser` visualization under one import
 
 If you use this code, please cite our RAL paper (preprint [here](https://arxiv.org/abs/2601.04493)):
 
@@ -174,9 +174,9 @@ cmake --install build-cpp --prefix build-cpp/install
 This produces a standalone `bendier_solvers` C++ library.
 The last line creates a staged install under `build-cpp/install/` that you can copy or point other projects at.
 
-# Running Demo Scripts
+# Running Demos
 
-Plotting utilities live in the `bendier.plotting` package, and runnable examples live in `python/scripts/`.
+Plotting utilities live in the `bendier.visualization` package, and runnable examples live in `python/scripts/`.
 
 A handful of simple demo simulations can be run with:
 
@@ -192,9 +192,19 @@ cd python
 bash run_ral_sims.bash
 ```
 
-When the chosen script runs successfully, a PyVista render window will appear showing real-time solution geometries for the selected model.
-Solution metadata is displayed in the upper-right corner, including optimization solve times and related diagnostics.
-These should automatically save MP4 videos of the simulations to `python/output/videos` and any figures to `python/output/figures`.
+When the chosen script runs successfully, you can visualize the simulation in `viser` by clicking the link output by the script (e.g. http://localhost:8080).
+Your browser will open showing real-time solution geometries for the selected model, as well as solution metadata.
+
+You can also run sever apps to visualize forward and inverse mechanics simulations in real-time:
+
+```bash
+python apps/cosserat_rod_forward_sim.py
+python apps/tendon_forward_sim.py
+python apps/parallel_robot_forward_sim.py
+```
+
+These apps have sliders to control inputs, as well as draggable 3D frames to control the robot's base pose and tip pose for inverse mechanics visulaization. 
+Note that these can also be run from other machines that can reach the host machine, just by directly visiting the host machine's IP address and port.
 
 ## Debugging Tips
 

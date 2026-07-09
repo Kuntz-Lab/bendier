@@ -1,5 +1,4 @@
 import numpy as np
-import pyvista as pv
 
 from scipy.integrate import solve_ivp
 from scipy.optimize import root
@@ -15,12 +14,11 @@ def hat(v):
 
 
 class ParallelRobotBaseline:
-    def __init__(self, K_inv, base_end_poses, tip_end_poses, num_eval_points=100, plot=False):
+    def __init__(self, K_inv, base_end_poses, tip_end_poses, num_eval_points=100):
 
         self.K_se_inv = K_inv[3:,3:]
         self.K_bt_inv = K_inv[:3,:3]
         self.num_eval_points = num_eval_points
-        self.plot = plot
 
         self.start_conditions_guess = np.zeros(6 * 6)
 
@@ -46,36 +44,12 @@ class ParallelRobotBaseline:
         
         return y_dot
 
-    def plot_solution(self, rods):
-        plotter = pv.Plotter()
-        
-        p_base = [rod['pose'][0,:3,3] for rod in rods]
-        base = pv.Cylinder(center=np.mean(p_base, axis=0), direction=(0, 0, 1), radius=0.3, height=0.01)
-        plotter.add_mesh(base, color='silver')
-
-        p_tip = [rod['pose'][-1,:3,3] for rod in rods]
-        z_tip = rods[0]['pose'][-1,:3,2]
-        tip = pv.Cylinder(center=np.mean(p_tip, axis=0), direction=z_tip, radius=0.15, height=0.01)
-        plotter.add_mesh(tip, color='silver', opacity=0.5)
-
-        for rod in rods:
-            spline = pv.Spline(rod['pose'][:,:3,3], n_points=200)
-            tube = spline.tube(radius=0.005)
-            plotter.add_mesh(tube, color='ultramarine', opacity = 0.5)
-
-        plotter.enable_anti_aliasing()
-        plotter.add_axes()
-        plotter.show()
-
     def solve(self, rod_lengths, tip_force=np.zeros(3), tip_moment=np.zeros(3)):
         result = root(self.total_shooting_residual, self.start_conditions_guess, args=(rod_lengths, tip_force, tip_moment), tol=1e-10)
         self.start_conditions_guess = result.x
-        
+
         solution = self.integrate_rods(result.x, rod_lengths)
 
-        if self.plot:
-            self.plot_solution(solution)
-        
         return solution
     
     def unpack_x(self, x):

@@ -1,41 +1,40 @@
 import argparse
-import time
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
 import bendier
-from bendier.viser_plotting import ViserCosseratRodPlotter
+from bendier.visualization import CosseratRodPlotter, FramePacer
 from config import get_config
 
 
 def get_tip_force_prior(t):
-    xy_dir = np.array([np.cos(0.2 * t), np.sin(0.2 * t)])
-    f_xy = 0.5 * xy_dir
-    f_z = 3 * np.sin(0.6 * t)
+    xy_dir = np.array([np.cos(0.8 * t), np.sin(0.8 * t)])
+    f_xy = 2.0 * xy_dir
+    f_z = 3 * np.sin(2.5 * t)
 
     tip_wrench_mean = np.hstack((np.zeros(3), f_xy, f_z))
 
     tip_wrench_cov = 1e-6 * np.eye(6)
 
     sigma_amplitude = 0.1
-    sigma = 1e-3 + sigma_amplitude - sigma_amplitude * np.cos(0.2 * t)
+    sigma = 1e-3 + sigma_amplitude - sigma_amplitude * np.cos(0.8 * t)
     tip_wrench_cov[3:,3:] = sigma ** 2 * np.eye(3)
 
     return bendier.Vector6Gaussian(tip_wrench_mean, tip_wrench_cov), None
 
 
 def get_tip_moment_prior(t):
-    xy_dir = np.array([np.cos(0.2 * t), np.sin(0.22 * t)])
+    xy_dir = np.array([np.cos(0.8 * t), np.sin(0.8 * t)])
     m_xy = 1.0 * xy_dir
-    m_z = 2.0 * np.sin(0.24 * t)
+    m_z = 2.0 * np.sin(2.5 * t)
 
     tip_wrench_mean = np.hstack((m_xy, m_z, np.zeros(3)))
 
     tip_wrench_cov = 1e-6 * np.eye(6)
 
     sigma_amplitude = 0.01
-    sigma = 1e-3 + sigma_amplitude - sigma_amplitude * np.cos(0.2 * t)
+    sigma = 1e-3 + sigma_amplitude - sigma_amplitude * np.cos(0.8 * t)
     tip_wrench_cov[:3,:3] = sigma ** 2 * np.eye(3)
 
     return bendier.Vector6Gaussian(tip_wrench_mean, tip_wrench_cov), None
@@ -43,13 +42,13 @@ def get_tip_moment_prior(t):
 
 def get_tip_pose_prior(t):
     x = 0.2
-    yz = 0.1 * np.array([np.sin(0.4 * t), np.cos(0.4 * t)])
+    yz = 0.1 * np.array([np.sin(1.6 * t), np.cos(1.6 * t)])
     yz[1] += 0.25
     p = np.hstack((x, yz))
 
     r0 = np.array([0, np.pi / 2, 0])
     R0 = Rotation.from_rotvec(r0).as_matrix()
-    dr = np.pi / 4 * np.array([np.sin(0.4 * t), np.sin(0.6 * t), np.sin(0.8 * t)])
+    dr = np.pi / 4 * np.array([np.sin(1.6 * t), np.sin(2.4 * t), np.sin(3.2 * t)])
     dR = Rotation.from_rotvec(dr).as_matrix()
     R = R0 @ dR
 
@@ -89,22 +88,23 @@ def main(args):
 
     solver = bendier.CosseratRodSolver(config)
 
-    plotter = ViserCosseratRodPlotter(
+    plotter = CosseratRodPlotter(
         plot_wrenches=args.tip_prior != "pose",
         plot_backbone_frames=True,
         plot_tip_plate=args.tip_prior == "pose")
 
     frame_rate = 30.0
     dt = 1.0 / frame_rate
-    t_final = 20.0
+    t_final = 5.0
     num_steps = int(t_final / dt)
+    pacer = FramePacer(dt)
 
     for step in range(num_steps + 1):
         t = step * dt
 
         solution = solver.solve(*prior_getter(t), None)
         plotter.update(solution)
-        time.sleep(dt)
+        pacer.tick()
 
         progress = 100.0 * step / num_steps
         print(f"Progress: {progress:5.1f}%", end="\r")

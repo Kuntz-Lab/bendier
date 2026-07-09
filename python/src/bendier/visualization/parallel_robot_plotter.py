@@ -1,30 +1,21 @@
-"""viser equivalent of bendier.plotting.parallel_robot_plotter.
-
-Reuses ViserCosseratRodMeshManager once per rod (rod count from the
-solution, not hardcoded) plus a platform disc, mirroring the pyvista
-ParallelRobotPlotter's constructor options and method names.
-"""
-
 import itertools
 
 import numpy as np
 import viser
 
 from . import utils
-from .cosserat_rod_plotter import ViserCosseratRodMeshManager
+from .cosserat_rod_plotter import CosseratRodMeshManager
 
 ROD_COLORS = [
     (102, 51, 153), (227, 23, 13), (255, 97, 3),
     (255, 176, 15), (46, 139, 87), (65, 105, 225),
 ]
-PLATFORM_SIDES = 24
-PLATFORM_LEG_SIDES = 8
-# Bigger than the tendon robot's -- the parallel robot's platform/rod scale
-# is tens of centimeters rather than millimeters.
+PLATFORM_SIDES = 64
+PLATFORM_LEG_SIDES = 16
 TIP_FORCE_ARROW_SHAFT_RADIUS = 0.006
 
 
-class ViserParallelRobotPlotter:
+class ParallelRobotPlotter:
     def __init__(self,
                  server=None,
                  port=8080,
@@ -57,6 +48,8 @@ class ViserParallelRobotPlotter:
         self.platform_joint = None
         self.platform_ellipsoid = None
         self.tip_force_ellipsoid = None
+        self.tip_force_arrow_handle = None
+        self.tip_force_gt_arrow_handle = None
 
         utils.add_disc(
             self.server.scene, "/base_plate", np.eye(4), 0.2, 0.01, utils.SILVER,
@@ -69,7 +62,7 @@ class ViserParallelRobotPlotter:
         self.rod_managers = []
         colors = itertools.cycle(ROD_COLORS)
         for i in range(num_rods):
-            self.rod_managers.append(ViserCosseratRodMeshManager(
+            self.rod_managers.append(CosseratRodMeshManager(
                 self.server.scene,
                 prefix=f"/rods/{i}",
                 plot_base_plate=False,
@@ -137,9 +130,9 @@ class ViserParallelRobotPlotter:
         f = solution.platform_wrench.mean[3:]
         cov = solution.platform_wrench.cov[3:, 3:]
 
-        utils.set_vector_arrow(
+        self.tip_force_arrow_handle = utils.set_vector_arrow(
             self.server.scene, "/platform_tip_force", p, f, self.force_scale, color=utils.DARK_ORCHID,
-            shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
+            shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS, handle=self.tip_force_arrow_handle)
 
         if self.tip_force_ellipsoid is None:
             self.tip_force_ellipsoid = utils.add_ellipsoid(
@@ -150,9 +143,10 @@ class ViserParallelRobotPlotter:
                 self.tip_force_ellipsoid, p + f * self.force_scale, cov, scale=self.force_scale)
 
         if tip_force_gt is not None:
-            utils.set_vector_arrow(
+            self.tip_force_gt_arrow_handle = utils.set_vector_arrow(
                 self.server.scene, "/platform_tip_force_gt", p, tip_force_gt,
-                self.force_scale, color=utils.GREEN, shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS)
+                self.force_scale, color=utils.GREEN, shaft_radius=TIP_FORCE_ARROW_SHAFT_RADIUS,
+                handle=self.tip_force_gt_arrow_handle)
 
     def update(self, solution, tip_force_gt=None):
         self._ensure_rod_managers(len(solution.marginals.rods))
