@@ -26,4 +26,6 @@ dependencies = [
     "imageio-ffmpeg==0.6.0",
     "viser==1.0.30",
     "trimesh==4.12.2",
+    "yourdfpy==0.0.60",
+    "robot_descriptions==3.0.0",
 ]

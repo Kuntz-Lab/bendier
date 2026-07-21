@@ -11,6 +11,8 @@
 #include "cosserat_rod/CosseratStressFactor.h"
 #include "parallel_robot/PlatformWrenchBalanceFactor.h"
 #include "parallel_robot/SingleRodBaseFactor.h"
+#include "rigid_robot/RigidJointFactor.h"
+#include "rigid_robot/RigidJointTorqueFactor.h"
 #include "tendon_robot/TendonDiscWrenchFactor.h"
 #include "utils/WrenchTransforms.h"
 
@@ -353,6 +355,107 @@ TEST(TendonDiscWrenchFactor, jacobians_interior_three_tendons) {
   values.insert(ext_wrench_k, wrench_1());
 
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(RigidJointFactor, jacobians_revolute) {
+  Key pose_parent_k = 1, pose_child_k = 2, offset_k = 3, joint_vec_k = 4;
+
+  RigidJointFactor factor(
+      pose_parent_k, pose_child_k, offset_k, joint_vec_k,
+      /*joint_idx=*/1, Vector3(0, 0, 1), JointType::Revolute,
+      noiseModel::Unit::Create(6));
+
+  Values values;
+  values.insert(pose_parent_k, pose_a());
+  values.insert(pose_child_k, pose_b());
+  values.insert(offset_k, pose_c());
+  values.insert(joint_vec_k, tensions_of({0.3, -0.6, 0.9}));
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(RigidJointFactor, jacobians_prismatic) {
+  Key pose_parent_k = 1, pose_child_k = 2, offset_k = 3, joint_vec_k = 4;
+
+  RigidJointFactor factor(
+      pose_parent_k, pose_child_k, offset_k, joint_vec_k,
+      /*joint_idx=*/0, Vector3(0, 0, 1), JointType::Prismatic,
+      noiseModel::Unit::Create(6));
+
+  Values values;
+  values.insert(pose_parent_k, pose_a());
+  values.insert(pose_child_k, pose_b());
+  values.insert(offset_k, pose_c());
+  values.insert(joint_vec_k, tensions_of({0.05, -0.6, 0.9}));
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(RigidJointTorqueFactor, jacobians_revolute) {
+  Key pose_tip_k = 1, pose_child_k = 2, wrench_k = 3;
+
+  RigidJointTorqueFactor factor(
+      pose_tip_k, pose_child_k, wrench_k, Vector3(0, 0, 1), JointType::Revolute,
+      /*torque_meas=*/0.35, noiseModel::Unit::Create(1));
+
+  Values values;
+  values.insert(pose_tip_k, pose_a());
+  values.insert(pose_child_k, pose_b());
+  values.insert(wrench_k, wrench_1());
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(RigidJointTorqueFactor, jacobians_prismatic) {
+  Key pose_tip_k = 1, pose_child_k = 2, wrench_k = 3;
+
+  RigidJointTorqueFactor factor(
+      pose_tip_k, pose_child_k, wrench_k, Vector3(0, 1, 0), JointType::Prismatic,
+      /*torque_meas=*/-1.1, noiseModel::Unit::Create(1));
+
+  Values values;
+  values.insert(pose_tip_k, pose_b());
+  values.insert(pose_child_k, pose_c());
+  values.insert(wrench_k, wrench_2());
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+// Independent physics check (not just Jacobians): a pure force with no
+// moment, applied at the tip, transported back to a joint's own location by
+// the factor's internal transform_wrench_translation call and projected onto
+// the joint's world-frame axis, should match the textbook "torque = axis .
+// (r x F)" lever-arm formula -- computed here by hand with Eigen's cross(),
+// entirely independent of the factor's own internals.
+TEST(RigidJointTorqueFactor, matches_textbook_cross_product_torque) {
+  Vector3 force(2.0, -1.5, 0.7);
+  Vector3 axis(0, 0, 1);  // in the joint's local frame
+
+  Point3 tip_point(0.6, 0.05, 0.55);
+  Pose3 pose_tip(Rot3::Identity(), tip_point);  // orientation irrelevant to transport
+
+  Pose3 pose_joint(Rot3::Rodrigues(0.1, -0.2, 0.05), Point3(0.3, -0.1, 0.4));
+
+  Vector6 tip_wrench;
+  tip_wrench << Vector3::Zero(), force;  // pure force, no moment, at the tip
+
+  Key pose_tip_k = 1, pose_joint_k = 2, wrench_k = 3;
+  RigidJointTorqueFactor factor(
+      pose_tip_k, pose_joint_k, wrench_k, axis, JointType::Revolute,
+      /*torque_meas=*/0.0, noiseModel::Unit::Create(1));
+
+  Values values;
+  values.insert(pose_tip_k, pose_tip);
+  values.insert(pose_joint_k, pose_joint);
+  values.insert(wrench_k, tip_wrench);
+
+  double tau_from_factor = factor.unwhitenedError(values)(0);  // torque_meas is 0, so error == predicted torque
+
+  Vector3 r = tip_point - pose_joint.translation();
+  Vector3 axis_world = pose_joint.rotation().rotate(axis);
+  double tau_expected = axis_world.dot(r.cross(force));
+
+  EXPECT(std::abs(tau_from_factor - tau_expected) < 1e-9);
 }
 
 int main() {

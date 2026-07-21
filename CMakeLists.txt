@@ -30,6 +30,10 @@ set(BENDIER_SOLVER_SOURCES
   src/parallel_robot/ParallelRobotSolver.cpp
   src/parallel_robot/PlatformWrenchBalanceFactor.cpp
   src/parallel_robot/SingleRodBaseFactor.cpp
+  src/rigid_robot/RigidJointFactor.cpp
+  src/rigid_robot/RigidJointTorqueFactor.cpp
+  src/rigid_robot/RigidRobotModel.cpp
+  src/rigid_robot/RigidRobotSolver.cpp
   src/tendon_robot/TendonDiscWrenchFactor.cpp
   src/tendon_robot/TendonRobotModel.cpp
   src/tendon_robot/TendonRobotSolver.cpp
@@ -61,6 +65,7 @@ install(DIRECTORY
   ${CMAKE_CURRENT_SOURCE_DIR}/src/cosserat_rod
   ${CMAKE_CURRENT_SOURCE_DIR}/src/measurement
   ${CMAKE_CURRENT_SOURCE_DIR}/src/parallel_robot
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rigid_robot
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tendon_robot
   ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
   DESTINATION include/bendier
@@ -100,6 +105,7 @@ if(BENDIER_BUILD_PYTHON)
   set(BENDIER_PYBIND_SOURCES
     src/cosserat_rod/pybind.cpp
     src/parallel_robot/pybind.cpp
+    src/rigid_robot/pybind.cpp
     src/tendon_robot/pybind.cpp
     src/pybind/bindings.cpp
   )
