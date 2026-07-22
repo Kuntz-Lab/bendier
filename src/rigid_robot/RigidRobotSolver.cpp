@@ -18,6 +18,7 @@ RigidRobotSolver::RigidRobotSolver(const RigidRobotSolverConfig& config)
     model_ = std::make_unique<RigidRobotModel>(RigidRobotModelConfig{
         .joints = config.joints,
         .base_pose_calibration = config.base_pose_calibration,
+        .tip_offset_calibration = config.tip_offset_calibration,
         .chain_noise = chain_noise,
         .enable_wrench_sensing = config.enable_wrench_sensing,
     });
@@ -26,7 +27,8 @@ RigidRobotSolver::RigidRobotSolver(const RigidRobotSolverConfig& config)
 Solution<RigidRobotModel::ModelMarginals> RigidRobotSolver::solve(
     const VectorXGaussian& joint_prior,
     const std::optional<Vector6Gaussian>& tip_wrench_prior,
-    const std::optional<VectorXGaussian>& joint_torque_meas)
+    const std::optional<VectorXGaussian>& joint_torque_meas,
+    const std::optional<Pose3Gaussian>& tip_pose_prior)
 {
     if (joint_prior.mean.size() != model_->get_num_joints())
         throw std::invalid_argument("RigidRobotSolver: joint_prior size must match num_joints");
@@ -65,13 +67,19 @@ Solution<RigidRobotModel::ModelMarginals> RigidRobotSolver::solve(
             tip_wrench_prior->mean,
             noiseModel::Gaussian::Covariance(tip_wrench_prior->cov)));
 
+    if (tip_pose_prior)
+        priors.add(PriorFactor<Pose3>(
+            model_->get_tip_pose_key(),
+            Pose3(tip_pose_prior->mean),
+            noiseModel::Gaussian::Covariance(tip_pose_prior->cov)));
+
     if (joint_torque_meas) {
         int num_joints = model_->get_num_joints();
         if (joint_torque_meas->mean.size() != num_joints)
             throw std::invalid_argument(
                 "RigidRobotSolver: joint_torque_meas size must match num_joints");
 
-        Key pose_tip_key = model_->get_pose_key(-1);
+        Key pose_tip_key = model_->get_tip_pose_key();
         Key wrench_key = model_->get_tip_wrench_key();
 
         for (int i = 0; i < num_joints; ++i) {

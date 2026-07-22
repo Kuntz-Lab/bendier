@@ -35,14 +35,18 @@ class RigidRobotMeshManager:
         self.joint_torque_arrows_batch = None
         self.joint_torque_ellipsoid_batch = None
 
-    def update_link_ellipsoids(self, links):
+    def update_link_ellipsoids(self, links, tip_pose):
         if not self.plot_link_ellipsoids:
             return
 
-        positions = np.array([link.pose.mean[:3, 3] for link in links])
+        # Actuated links plus the true tip pose (a separate variable, past
+        # the last actuated link's fixed-but-uncertain tip offset) -- so the
+        # tip's own (generally larger) uncertainty is visible too.
+        poses = [link.pose for link in links] + [tip_pose]
+        positions = np.array([pose.mean[:3, 3] for pose in poses])
         world_covs = np.array([
-            link.pose.mean[:3, :3] @ link.pose.cov[3:, 3:] @ link.pose.mean[:3, :3].T
-            for link in links
+            pose.mean[:3, :3] @ pose.cov[3:, 3:] @ pose.mean[:3, :3].T
+            for pose in poses
         ])
 
         if self.link_ellipsoid_batch is None:
@@ -128,8 +132,8 @@ class RigidRobotMeshManager:
                 self.joint_torque_ellipsoid_batch, ellipsoid_positions, world_covs, scale=self.torque_scale)
 
     def update(self, marginals, joint_axes=None):
-        self.update_link_ellipsoids(marginals.links)
-        self.update_tip_wrench(marginals.links[-1].pose.mean, marginals.tip_wrench)
+        self.update_link_ellipsoids(marginals.links, marginals.tip_pose)
+        self.update_tip_wrench(marginals.tip_pose.mean, marginals.tip_wrench)
         if joint_axes is not None:
             self.update_joint_torques(marginals.links, joint_axes, marginals.joint_torques)
 

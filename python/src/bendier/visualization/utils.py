@@ -69,6 +69,16 @@ def pose_batch_to_wxyz(poses: np.ndarray) -> np.ndarray:
     return np.concatenate([xyzw[:, 3:4], xyzw[:, :3]], axis=1)
 
 
+def position_wxyz_to_pose(position: np.ndarray, wxyz: np.ndarray) -> np.ndarray:
+    """Inverse of pose_to_wxyz -- builds a 4x4 pose from a viser scene node's
+    own .position/.wxyz (e.g. a transform-controls gizmo the user dragged)."""
+    w, x, y, z = wxyz
+    pose = np.eye(4)
+    pose[:3, :3] = Rotation.from_quat([x, y, z, w]).as_matrix()
+    pose[:3, 3] = position
+    return pose
+
+
 def setup_default_lighting(server, environment_intensity=0.6, sun_intensity=3.0):
     # cast_shadow is left at its default (False) -- a shadow-casting light on
     # thin/flat objects (discs, the tube) produced fine-grained shadow-acne

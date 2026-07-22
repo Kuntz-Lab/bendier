@@ -21,6 +21,14 @@ DEFAULT_OFFSET_SIGMA_POS = 1e-4  # m
 DEFAULT_BASE_SIGMA_ROT = 1e-6
 DEFAULT_BASE_SIGMA_POS = 1e-6
 
+# iiwa7_description's kinematic chain ends at iiwa_link_7, but the actual
+# tool/flange frame (iiwa_link_ee) is a further fixed offset past that --
+# small, but enough to matter for where "the tip" visually is. Calibration
+# uncertainty here is a bit looser than the base's since it's further out
+# and would in practice depend on whatever tool is actually mounted.
+DEFAULT_TIP_OFFSET_SIGMA_ROT = 1e-4
+DEFAULT_TIP_OFFSET_SIGMA_POS = 1e-4
+
 
 def load_urdf():
     from robot_descriptions.loaders.yourdfpy import load_robot_description
@@ -60,3 +68,27 @@ def build_joint_specs(
 def build_base_calibration(sigma_rot=DEFAULT_BASE_SIGMA_ROT, sigma_pos=DEFAULT_BASE_SIGMA_POS):
     import bendier
     return bendier.Pose3Gaussian(np.eye(4), _rot_pos_cov(sigma_rot, sigma_pos))
+
+
+def build_tip_offset_calibration(
+        urdf, sigma_rot=DEFAULT_TIP_OFFSET_SIGMA_ROT, sigma_pos=DEFAULT_TIP_OFFSET_SIGMA_POS):
+    """Nominal transform from the last actuated link out to the true tool
+    tip, read straight off the URDF's own fixed joint(s) -- not via
+    yourdfpy's FK/kinematics engine (get_transform), just the raw parsed
+    <origin> data, same as build_joint_specs does for the actuated joints.
+    """
+    import bendier
+
+    last_link = urdf.actuated_joints[-1].child
+    offset = np.eye(4)
+    while True:
+        next_joint = next(
+            (j for j in urdf.joint_map.values() if j.parent == last_link and j.type == "fixed"),
+            None)
+        if next_joint is None:
+            break
+        origin = next_joint.origin if next_joint.origin is not None else np.eye(4)
+        offset = offset @ origin
+        last_link = next_joint.child
+
+    return bendier.Pose3Gaussian(offset, _rot_pos_cov(sigma_rot, sigma_pos))

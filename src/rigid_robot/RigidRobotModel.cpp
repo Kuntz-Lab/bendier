@@ -3,6 +3,7 @@
 #include "utils/ModelConcept.h"
 
 #include <gtsam/nonlinear/PriorFactor.h>
+#include <gtsam/slam/BetweenFactor.h>
 #include <stdexcept>
 
 using namespace gtsam;
@@ -16,6 +17,7 @@ RigidRobotModel::RigidRobotModel(const RigidRobotModelConfig& config)
     num_links_(num_joints_ + 1),
     joint_specs_(config.joints),
     base_pose_calibration_(config.base_pose_calibration),
+    tip_offset_calibration_(config.tip_offset_calibration),
     chain_noise_(config.chain_noise),
     enable_wrench_sensing_(config.enable_wrench_sensing)
 {
@@ -52,6 +54,7 @@ Key RigidRobotModel::get_pose_key(int link_idx) const { return pose_keys_[clamp_
 Key RigidRobotModel::get_offset_key(int joint_idx) const { return offset_keys_[clamp_joint_idx(joint_idx)]; }
 Key RigidRobotModel::get_joint_vector_key() const { return Symbol('Q', id_); }
 Key RigidRobotModel::get_tip_wrench_key() const { return Symbol('W', id_); }
+Key RigidRobotModel::get_tip_pose_key() const { return Symbol('P', id_); }
 
 const Vector3& RigidRobotModel::get_joint_axis(int joint_idx) const {
     return joint_specs_[clamp_joint_idx(joint_idx)].axis;
@@ -95,6 +98,8 @@ Values RigidRobotModel::get_initial_values(
         values.insert(pose_keys_[i + 1], pose);
     }
 
+    values.insert(get_tip_pose_key(), pose * Pose3(tip_offset_calibration_.mean));
+
     return values;
 }
 
@@ -124,6 +129,17 @@ NonlinearFactorGraph RigidRobotModel::build_graph() const
             Pose3(joint_specs_[i].offset_calibration.mean),
             noiseModel::Gaussian::Covariance(joint_specs_[i].offset_calibration.cov)));
     }
+
+    // Fixed (but uncertain) transform from the last actuated link out to the
+    // true end-effector/tool-tip pose. No joint motion is involved here --
+    // unlike RigidJointFactor's per-joint chain, this needs nothing but a
+    // plain built-in BetweenFactor between the last link and a dedicated
+    // tip_pose variable.
+    graph.add(BetweenFactor<Pose3>(
+        pose_keys_.back(),
+        get_tip_pose_key(),
+        Pose3(tip_offset_calibration_.mean),
+        noiseModel::Gaussian::Covariance(tip_offset_calibration_.cov)));
 
     // No internal physics factor needed for the tip wrench itself: with no
     // distributed load along a rigid link, it's the same wrench at every
@@ -158,6 +174,20 @@ RigidRobotMarginals RigidRobotModel::get_marginals(
     out.joints.mean = values.at<Vector>(joint_key);
     out.joints.cov  = marginals.marginalCovariance(joint_key);
 
+    Key tip_pose_key = get_tip_pose_key();
+    out.tip_pose.mean = values.at<Pose3>(tip_pose_key).matrix();
+    out.tip_pose.cov  = marginals.marginalCovariance(tip_pose_key);
+
+    {
+        // Same technique as TendonRobotModel::get_J_pose_tensions: for a
+        // locally-linear T = J*Q + noise relationship, Cov(T,Q) = J*Cov(Q,Q),
+        // so J = Sigma_TQ * Sigma_QQ^-1 (the marginal information of Q).
+        JointMarginal joint_marg = marginals.jointMarginalCovariance({joint_key, tip_pose_key});
+        Matrix sigma_TQ = joint_marg(tip_pose_key, joint_key);       // 6 x num_joints
+        Matrix sigma_QQ_inv = marginals.marginalInformation(joint_key);  // num_joints x num_joints
+        out.J_tip_joints = sigma_TQ * sigma_QQ_inv;
+    }
+
     if (enable_wrench_sensing_) {
         Key wrench_key = get_tip_wrench_key();
         Vector6 tip_wrench_mean = values.at<Vector6>(wrench_key);
@@ -177,12 +207,12 @@ RigidRobotMarginals RigidRobotModel::get_marginals(
         joint_torques.mean = Vector::Zero(num_joints_);
         joint_torques.cov = Matrix::Zero(num_joints_, num_joints_);
 
-        Pose3 pose_tip = values.at<Pose3>(pose_keys_.back());
+        Pose3 pose_tip = values.at<Pose3>(tip_pose_key);
         for (int i = 0; i < num_joints_; ++i) {
             Pose3 pose_child = values.at<Pose3>(pose_keys_[i + 1]);
 
             RigidJointTorqueFactor factor(
-                pose_keys_.back(), pose_keys_[i + 1], wrench_key,
+                tip_pose_key, pose_keys_[i + 1], wrench_key,
                 joint_specs_[i].axis, joint_specs_[i].type,
                 /*torque_meas=*/0.0, noiseModel::Unit::Create(1));
 

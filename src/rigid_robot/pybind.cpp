@@ -33,6 +33,8 @@ void bind_rigid_robot(py::module& m) {
         .BIND_FIELD(RigidRobotMarginals, links)
         .BIND_FIELD(RigidRobotMarginals, offsets)
         .BIND_FIELD(RigidRobotMarginals, joints)
+        .BIND_FIELD(RigidRobotMarginals, tip_pose)
+        .BIND_FIELD(RigidRobotMarginals, J_tip_joints)
         .BIND_FIELD(RigidRobotMarginals, tip_wrench)
         .BIND_FIELD(RigidRobotMarginals, joint_torques);
 
@@ -42,11 +44,13 @@ void bind_rigid_robot(py::module& m) {
         .def(py::init<
                 std::vector<RigidJointSpec>,
                 Pose3Gaussian,
+                Pose3Gaussian,
                 double, double,
                 bool,
                 const SolverBaseConfig&>(),
             py::arg("joints"),
             py::arg("base_pose_calibration"),
+            py::arg("tip_offset_calibration"),
             py::arg("sigma_chain_rot") = 1e-6,
             py::arg("sigma_chain_pos") = 1e-6,
             py::arg("enable_wrench_sensing") = false,
@@ -58,5 +62,6 @@ void bind_rigid_robot(py::module& m) {
             py::arg("joint_prior"),
             py::arg("tip_wrench_prior") = py::none(),
             py::arg("joint_torque_meas") = py::none(),
+            py::arg("tip_pose_prior") = py::none(),
             py::call_guard<py::gil_scoped_release>());
 }
