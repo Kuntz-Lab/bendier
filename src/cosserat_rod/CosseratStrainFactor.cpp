@@ -103,14 +103,14 @@ Vector CosseratStrainFactor::evaluateError(
     OptionalMatrixType H3, 
     OptionalMatrixType H4) const 
 {
-    // Get delta of p1 relative to p0
-    Matrix6 d_delta_d_p0, d_delta_d_p1;
-    Pose3 delta = p0.between(p1, d_delta_d_p0, d_delta_d_p1);
+    // Twist of p1 relative to p0, in frame p0. localCoordinates gives this
+    // directly with its correctly chain-ruled derivatives -- between()+Logmap()
+    // computes the same thing, but between()'s own H2 (w.r.t. its second
+    // argument) is always the identity matrix, so chaining it through Logmap's
+    // derivative via an explicit multiply is pure wasted work.
+    Matrix6 d_twist_d_p0, d_twist_d_p1;
+    Vector6 twist = p0.localCoordinates(p1, d_twist_d_p0, d_twist_d_p1);
 
-    // Twist based on poses in frame p0
-    Matrix6 d_twist_d_delta;
-    Vector6 twist = Pose3::Logmap(delta, d_twist_d_delta);
-    
     // s0, s1 are world-frame, so rotate into each node's own body frame first.
     Matrix6 d_s0body_d_s0, d_s0body_d_p0;
     Vector6 s0_body = spatial_to_body_wrench(s0, p0, d_s0body_d_s0, d_s0body_d_p0);
@@ -133,12 +133,12 @@ Vector CosseratStrainFactor::evaluateError(
     Vector6 error = strain_pred -  twist / ds_;
 
     if (H1) {
-        *H1 = -1 / ds_ * d_twist_d_delta * d_delta_d_p0
+        *H1 = -1 / ds_ * d_twist_d_p0
             + d_strain_d_w0 * K_inv_ * d_s0body_d_p0;
     }
 
     if (H2) {
-        *H2 = -1 / ds_ * d_twist_d_delta * d_delta_d_p1
+        *H2 = -1 / ds_ * d_twist_d_p1
             + d_strain_d_w1 * K_inv_ * d_s1body_d_p1;
     }
 

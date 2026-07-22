@@ -25,7 +25,6 @@ set(BENDIER_SOLVER_SOURCES
   src/cosserat_rod/CosseratStrainFactor.cpp
   src/cosserat_rod/CosseratStressFactor.cpp
   src/measurement/ActuationForceMeasFactor.cpp
-  src/measurement/PositionPriorFactor.cpp
   src/parallel_robot/ParallelRobotModel.cpp
   src/parallel_robot/ParallelRobotSolver.cpp
   src/parallel_robot/PlatformWrenchBalanceFactor.cpp

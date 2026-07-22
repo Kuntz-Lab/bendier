@@ -2,10 +2,10 @@
 
 #include <gtsam/nonlinear/PriorFactor.h>
 
-#include "measurement/PositionPriorFactor.h"
 #include "utils/Gaussians.h"
 #include "utils/MiscInline.h"
 #include <gtsam/linear/NoiseModel.h>
+#include <gtsam/slam/PoseTranslationPrior.h>
 
 using namespace gtsam;
 
@@ -62,7 +62,7 @@ Solution<TendonRobotModel::ModelMarginals> TendonRobotSolver::solve(
         *model_->get_external_wrench_key(num_nodes - 1), tip_wrench_mean, tip_wrench_noise));
 
     if (tip_position_meas)
-        priors.add(PositionPriorFactor(
+        priors.add(PoseTranslationPrior<Pose3>(
             model_->get_pose_key(-1),
             tip_position_meas->mean,
             noiseModel::Gaussian::Covariance(tip_position_meas->cov)));

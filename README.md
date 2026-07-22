@@ -174,6 +174,26 @@ cmake --install build-cpp --prefix build-cpp/install
 This produces a standalone `bendier_solvers` C++ library.
 The last line creates a staged install under `build-cpp/install/` that you can copy or point other projects at.
 
+## Running C++ Tests
+
+`tests/JacobianTests.cpp` numerically checks every factor's analytical Jacobians against GTSAM's `numericalDerivative` (via `EXPECT_CORRECT_FACTOR_JACOBIANS`) -- the fastest way to catch a sign error or bad chain rule after touching any factor's `evaluateError`.
+
+The `bendier_tests` binary is built automatically (`BENDIER_BUILD_TESTS` defaults `ON`) as part of *either* build path above, so if you've already run `pip install -e .`, it's sitting in `build/` -- no separate C++-only build needed just to test:
+
+```bash
+cd build
+ctest                 # or: ./bendier_tests for more verbose CppUnitLite output
+```
+
+If you only built the C++ library (`build-cpp/` above), run it from there instead:
+
+```bash
+cd build-cpp
+ctest
+```
+
+Tests use GTSAM's own CppUnitLite framework, which is installed alongside GTSAM by the `sudo make install` step above -- no extra setup needed. If CMake can't find it, the `bendier_tests` target is silently skipped with a configure-time warning (`CppUnitLite not found; skipping bendier_tests target`); rerun `cmake` after confirming GTSAM installed it (`/usr/local/include/CppUnitLite/TestHarness.h`).
+
 # Running Demos
 
 Plotting utilities live in the `bendier.visualization` package, and runnable examples live in `python/scripts/`.
