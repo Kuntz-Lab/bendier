@@ -35,4 +35,5 @@ PYBIND11_MODULE(_bendier, m) {
     bind_cosserat_rod(m);
     bind_parallel_robot(m);
     bind_tendon_robot(m);
+    bind_rigid_robot(m);
 }
