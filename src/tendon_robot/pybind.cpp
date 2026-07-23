@@ -9,22 +9,16 @@
 namespace py = pybind11;
 
 void bind_tendon_robot(py::module& m) {
-    py::enum_<RoutingAngleFunction>(m, "RoutingAngleFunction")
-        .value("CONSTANT", RoutingAngleFunction::CONSTANT)
-        .value("LINEAR", RoutingAngleFunction::LINEAR)
-        .export_values();
-
     py::class_<RoutingFunctionParams>(m, "RoutingFunctionParams")
         .def(py::init<>())
         .def(py::init<double, double>(), py::arg("angle_offset"), py::arg("total_angle"))
         .BIND_FIELD(RoutingFunctionParams, angle_offset)
         .BIND_FIELD(RoutingFunctionParams, total_angle);
 
-    py::class_<TendonInput>(m, "TendonInput")
+    py::class_<TendonRoutingInput>(m, "TendonRoutingInput")
         .def(py::init<>())
-        .BIND_FIELD(TendonInput, functions)
-        .BIND_FIELD(TendonInput, params)
-        .BIND_FIELD(TendonInput, routing_radius);
+        .BIND_FIELD(TendonRoutingInput, params)
+        .BIND_FIELD(TendonRoutingInput, routing_radius);
 
     py::class_<TendonConfig>(m, "TendonConfig")
         .def(py::init<>())
@@ -44,9 +38,8 @@ void bind_tendon_robot(py::module& m) {
                 double, double,
                 double, double,
                 double, double,
-                const TendonInput&,
+                const TendonRoutingInput&,
                 double,
-                const std::vector<double>&,
                 double,
                 const SolverBaseConfig&>(),
             py::arg("rod_length"),
@@ -61,8 +54,7 @@ void bind_tendon_robot(py::module& m) {
             py::arg("sigma_base_pose_rot"),
             py::arg("tendon_input"),
             py::arg("sigma_displacement_constraint") = 1e-6,
-            py::arg("axial_stiffness") = std::vector<double>{},
-            py::arg("sigma_tension_nonneg") = 0.1,
+            py::arg("tendon_stiffness") = 1e5,
             py::arg("base") = SolverBaseConfig{});
 
     py::class_<TendonRobotMarginals>(m, "TendonRobotMarginals")

@@ -97,13 +97,12 @@ def damped_gauss_newton_step(J, error, damping):
 # state has every tension already at ~0, so comparing against a floor at or
 # above zero would treat literally the first step away from rest as a full
 # violation and freeze every slider permanently at its starting value.
-# Kept close to zero (not the same "soft tolerance" scale as the backend
-# TensionNonnegativityFactor) -- a looser floor tolerates each individual
-# incremental drag step (e.g. a continuous null-space or slider drag fires
-# many small steps), but those per-step violations compound: confirmed
-# empirically that -0.2 let a 10-step drag walk tension down to -0.16
-# cumulatively, well past what "close to zero" should mean, since each
-# individual step looked small enough to pass on its own.
+# Kept close to zero -- a looser floor tolerates each individual incremental
+# drag step (e.g. a continuous null-space or slider drag fires many small
+# steps), but those per-step violations compound: confirmed empirically that
+# -0.2 let a 10-step drag walk tension down to -0.16 cumulatively, well past
+# what "close to zero" should mean, since each individual step looked small
+# enough to pass on its own.
 TENSION_SAFETY_FLOOR = -0.02
 
 
@@ -114,9 +113,9 @@ def clip_step_for_tension_nonneg(delta, tension_current, J_tension_displacement,
     drop below `floor`. This is the same "fraction to the boundary" idea an
     interior-point method uses to limit a step -- an approximation (the true
     relationship is nonlinear, and empirically quite strongly so in some
-    regions of this system), not a hard guarantee, so it's a complement to
-    the TensionNonnegativityFactor backstop in the solver, not a replacement
-    for it. Returns delta unchanged if no violation is predicted.
+    regions of this system), not a hard guarantee. It's the only line of
+    defense against negative tension: the solver itself has no constraint on
+    tension sign. Returns delta unchanged if no violation is predicted.
     """
     predicted_delta = J_tension_displacement @ delta
     alpha = 1.0
@@ -202,7 +201,7 @@ class TendonRobotApp:
         # treating its absolute position as meaningful.
         self._null_space_prev_value = 0.0
 
-        self.num_tendons = len(get_dexterous_tendon_input().functions)
+        self.num_tendons = len(get_dexterous_tendon_input().params)
 
         self._build_gui()
         self.solve_and_update()
@@ -357,9 +356,8 @@ class TendonRobotApp:
             # protects all three uniformly: predict the effect of this
             # change on tension using the current linearized sensitivity,
             # and scale it back if it would cross into negative tension --
-            # never hand the solver a displacement we already expect to be
-            # inconsistent, rather than relying solely on the solver's own
-            # soft TensionNonnegativityFactor backstop to sort it out.
+            # this is the only guard against it, the solver itself places no
+            # constraint on tension sign.
             if self._last_solution is not None:
                 current_displacement = self._last_solution.marginals.displacements.mean
                 current_tension = self._last_solution.marginals.tensions.mean

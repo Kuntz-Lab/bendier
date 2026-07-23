@@ -190,8 +190,10 @@ RigidRobotMarginals RigidRobotModel::get_marginals(
         tip_wrench.cov = tip_wrench_cov;
         out.tip_wrench = tip_wrench;
 
-        // Projected tip wrench onto each joint axis 
-        // TODO: we can do this with a single jacobian J^T * tip_wrench_cov * J, implement and test this later
+        // Projected tip wrench onto each joint axis. Each joint's Jacobian
+        // has to be recomputed here (translation to pose_child, joint axis,
+        // and revolute/prismatic selection all differ per joint), so this
+        // stays a per-joint loop rather than a single shared Jacobian.
         VectorXGaussian joint_torques;
         joint_torques.mean = Vector::Zero(num_joints_);
         joint_torques.cov = Matrix::Zero(num_joints_, num_joints_);

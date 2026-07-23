@@ -15,6 +15,7 @@
 #include "rigid_robot/RigidJointTorqueFactor.h"
 #include "tendon_robot/TendonDiscWrenchFactor.h"
 #include "tendon_robot/TendonDisplacementFactor.h"
+#include "tendon_robot/TendonRobotSolver.h"
 #include "utils/WrenchTransforms.h"
 
 #include <cmath>
@@ -368,7 +369,7 @@ TEST(TendonDisplacementFactor, jacobians_two_discs) {
       {pose0_k, pose1_k}, tensions_k, displacements_k,
       {holes0, holes1},
       {0.24, 0.25, 0.23, 0.26},
-      {1e5, 1.2e5, 0.9e5, 1.1e5},
+      1e5,
       noiseModel::Unit::Create(4));
 
   Values values;
@@ -391,7 +392,7 @@ TEST(TendonDisplacementFactor, jacobians_three_discs) {
       {pose0_k, pose1_k, pose2_k}, tensions_k, displacements_k,
       {holes0, holes1, holes2},
       {0.24, 0.25, 0.23, 0.26},
-      {1e5, 1.2e5, 0.9e5, 1.1e5},
+      1e5,
       noiseModel::Unit::Create(4));
 
   Values values;
@@ -417,7 +418,7 @@ TEST(TendonDisplacementFactor, jacobians_three_tendons) {
       {pose0_k, pose1_k, pose2_k}, tensions_k, displacements_k,
       {holes0, holes1, holes2},
       {0.24, 0.25, 0.23},
-      {1e5, 1.2e5, 0.9e5},
+      1e5,
       noiseModel::Unit::Create(3));
 
   Values values;
@@ -442,14 +443,14 @@ TEST(TendonDisplacementFactor, matches_expected_stretch_formula) {
   auto holes = holes_at(0.005, 0.0, 4);  // same routing angle at both discs
 
   const std::vector<double> reference_lengths(4, dz);  // == dz, hand-verified below
-  const std::vector<double> axial_stiffness = {1e5, 1.2e5, 0.9e5, 1.1e5};
+  const double tendon_stiffness = 1e5;
   const Vector tensions = tensions_of({2.0, 1.5, 0.5, 3.0});
 
   TendonDisplacementFactor factor(
       {pose0_k, pose1_k}, tensions_k, displacements_k,
       {holes, holes},
       reference_lengths,
-      axial_stiffness,
+      tendon_stiffness,
       noiseModel::Unit::Create(4));
 
   Values values;
@@ -459,7 +460,7 @@ TEST(TendonDisplacementFactor, matches_expected_stretch_formula) {
 
   Vector4 expected_stretch;
   for (int i = 0; i < 4; ++i)
-    expected_stretch(i) = tensions(i) * dz / axial_stiffness[i];
+    expected_stretch(i) = tensions(i) * dz / tendon_stiffness;
 
   // At displacement == the hand-computed prediction, the residual should be
   // (near) exactly zero -- not just self-consistent with its own Jacobian.
@@ -488,13 +489,13 @@ TEST(TendonDisplacementFactor, matches_expected_geometric_formula_at_zero_tensio
   auto holes = holes_at(0.005, 0.0, 4);
 
   const std::vector<double> reference_lengths(4, dz);  // straight-line reference
-  const std::vector<double> axial_stiffness = {1e5, 1.2e5, 0.9e5, 1.1e5};
+  const double tendon_stiffness = 1e5;
 
   TendonDisplacementFactor factor(
       {pose0_k, pose1_k}, tensions_k, displacements_k,
       {holes, holes},
       reference_lengths,
-      axial_stiffness,
+      tendon_stiffness,
       noiseModel::Unit::Create(4));
 
   Values values;
@@ -541,7 +542,7 @@ TEST(TendonDisplacementFactor, matches_simple_stretch_model_at_realistic_curvatu
   TendonDisplacementFactor factor(
       {pose0_k, pose1_k}, tensions_k, displacements_k,
       {holes, holes},
-      {L_ref}, {EA},
+      {L_ref}, EA,
       noiseModel::Unit::Create(1));
 
   double natural_length_used = l_geom / (1.0 + tension / EA);
@@ -656,6 +657,86 @@ TEST(RigidJointTorqueFactor, matches_textbook_cross_product_torque) {
   double tau_expected = axis_world.dot(r.cross(force));
 
   EXPECT(std::abs(tau_from_factor - tau_expected) < 1e-9);
+}
+
+// init_tendon_disc_config is private and only reachable through a real
+// solve (TendonRobotMarginals::tendon_config is populated from it), so this
+// exercises the model's own hole/disc-index computation end to end, rather
+// than the TendonDisplacementFactor tests above, which all hand-supply
+// hole_locations/reference_lengths and never touch this code path.
+TEST(TendonRobotModel, disc_geometry_matches_hand_computed) {
+  const double rod_length = 0.24;
+  const int num_discs = 3;
+  const int num_between_nodes = 1;
+  const double routing_radius = 0.01;
+
+  TendonRoutingInput routing;
+  routing.routing_radius = routing_radius;
+  routing.params = {
+      RoutingFunctionParams{/*angle_offset=*/0.0, /*total_angle=*/0.0},   // straight, theta = 0 everywhere
+      RoutingFunctionParams{/*angle_offset=*/0.0, /*total_angle=*/M_PI},  // spans 0 -> pi along the rod
+  };
+
+  TendonRobotSolverConfig config(
+      rod_length, num_discs, num_between_nodes,
+      K_inv_1(),
+      /*sigma_strain_rot=*/0.1, /*sigma_strain_pos=*/0.01,
+      /*sigma_small_force=*/1e-4, /*sigma_small_moment=*/1e-5,
+      /*sigma_base_pose_pos=*/1e-4, /*sigma_base_pose_rot=*/1e-3,
+      routing);
+
+  TendonRobotSolver solver(config);
+  VectorXGaussian tensions{Vector::Zero(2), 1e-3 * Matrix::Identity(2, 2)};
+  auto solution = solver.solve(tensions);
+
+  const TendonConfig& tendon_config = solution.marginals.tendon_config;
+
+  // num_nodes = 5 (3 discs + 2 between each pair); discs at normalized
+  // arclength 0, 0.5, 1 land exactly on pose indices 0, 2, 4.
+  std::vector<int> expected_disc_pose_idx = {0, 2, 4};
+  EXPECT(tendon_config.disc_pose_idx == expected_disc_pose_idx);
+
+  for (int disc_idx = 0; disc_idx < num_discs; ++disc_idx) {
+    double s = static_cast<double>(disc_idx) / (num_discs - 1);
+    double theta1 = s * M_PI;
+
+    Point3 expected_hole0(routing_radius, 0.0, 0.0);
+    Point3 expected_hole1(routing_radius * std::cos(theta1), routing_radius * std::sin(theta1), 0.0);
+
+    EXPECT(assert_equal(expected_hole0, tendon_config.hole_locations[disc_idx][0], 1e-12));
+    EXPECT(assert_equal(expected_hole1, tendon_config.hole_locations[disc_idx][1], 1e-12));
+  }
+}
+
+// Verifies compute_reference_lengths (also private, also only reachable via
+// a real solve) is consistent with the model's own hole geometry: at zero
+// tension and zero external wrench, the rod settles at the same straight,
+// untwisted configuration that reference-length computation assumes, so
+// TendonDisplacementFactor's geometric term should exactly cancel the
+// reference length and predicted displacement should land at ~0 -- the
+// specific check suggested alongside the original TODO.
+TEST(TendonRobotModel, zero_tension_straight_rod_gives_near_zero_displacement) {
+  TendonRoutingInput routing;
+  routing.routing_radius = 0.01;
+  routing.params = {
+      RoutingFunctionParams{0.0, 0.0},
+      RoutingFunctionParams{M_PI, 0.0},
+      RoutingFunctionParams{M_PI / 2, M_PI},  // one helical tendon, so this isn't trivially symmetric
+  };
+
+  TendonRobotSolverConfig config(
+      /*rod_length=*/0.24, /*num_discs=*/3, /*num_between_nodes=*/1,
+      K_inv_1(),
+      /*sigma_strain_rot=*/0.1, /*sigma_strain_pos=*/0.01,
+      /*sigma_small_force=*/1e-6, /*sigma_small_moment=*/1e-7,
+      /*sigma_base_pose_pos=*/1e-6, /*sigma_base_pose_rot=*/1e-6,
+      routing);
+
+  TendonRobotSolver solver(config);
+  VectorXGaussian tensions{Vector::Zero(3), 1e-8 * Matrix::Identity(3, 3)};
+  auto solution = solver.solve(tensions);  // no tip_wrench -> defaults to a small near-zero prior
+
+  EXPECT(solution.marginals.displacements.mean.norm() < 1e-4);
 }
 
 int main() {

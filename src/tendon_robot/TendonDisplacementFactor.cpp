@@ -1,6 +1,7 @@
 #include "TendonDisplacementFactor.h"
 
 #include <gtsam/base/Matrix.h>
+#include <gtsam/geometry/Point3.h>
 
 #include "TendonGeometry.h"
 
@@ -25,14 +26,14 @@ TendonDisplacementFactor::TendonDisplacementFactor(
     Key displacements_key,
     std::vector<std::vector<Point3>> hole_locations,
     std::vector<double> reference_lengths,
-    std::vector<double> axial_stiffness,
+    double tendon_stiffness,
     const SharedNoiseModel& model)
 :
     NoiseModelFactor(model, make_keys(disc_pose_keys, tensions_key, displacements_key)),
     num_discs_(static_cast<int>(disc_pose_keys.size())),
     hole_locations_(std::move(hole_locations)),
     reference_lengths_(std::move(reference_lengths)),
-    axial_stiffness_(std::move(axial_stiffness))
+    tendon_stiffness_(tendon_stiffness)
 {}
 
 Vector TendonDisplacementFactor::unwhitenedError(
@@ -70,17 +71,17 @@ Vector TendonDisplacementFactor::unwhitenedError(
                 hole_locations_[k][i], hole_locations_[k + 1][i],
                 d_diff_d_pose_k, d_diff_d_pose_k1);
 
-            double seg_len = diff.norm();  // TODO gtsam should have a built in jacobian for this 
+            Matrix13 d_len_d_diff;
+            double seg_len = norm3(diff, d_len_d_diff);
             l_geom += seg_len;
 
-            Vector3 dir = diff / seg_len;
-            d_error_d_pose[k].row(i)     += dir.transpose() * d_diff_d_pose_k;
-            d_error_d_pose[k + 1].row(i) += dir.transpose() * d_diff_d_pose_k1;
+            d_error_d_pose[k].row(i)     += d_len_d_diff * d_diff_d_pose_k;
+            d_error_d_pose[k + 1].row(i) += d_len_d_diff * d_diff_d_pose_k1;
         }
 
         // Elastic stretch uses the reference length rather than the current geometric length
         // This should be a negligible second order effect
-        double stretch_coeff = reference_lengths_[i] / axial_stiffness_[i];
+        double stretch_coeff = reference_lengths_[i] / tendon_stiffness_;
 
         // Predicted displacement based on elasticity theory and current robot shape
         error(i) = displacements(i) - reference_lengths_[i] + l_geom - tensions(i) * stretch_coeff;

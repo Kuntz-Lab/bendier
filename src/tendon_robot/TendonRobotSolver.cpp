@@ -24,7 +24,7 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
         config.sigma_base_pose_rot, config.sigma_base_pose_pos);
 
     SharedDiagonal displacement_constraint_noise = noiseModel::Isotropic::Sigma(
-        static_cast<int>(config.tendon_input.functions.size()), config.sigma_displacement_constraint);
+        static_cast<int>(config.tendon_input.params.size()), config.sigma_displacement_constraint);
 
     int num_nodes = TendonRobotNumNodes(config.num_discs, config.num_between_nodes);
 
@@ -38,7 +38,7 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
         strain_noise,
         small_wrench_noise_,
         displacement_constraint_noise,
-        config.axial_stiffness,
+        config.tendon_stiffness,
         base_pose_mean,
         base_pose_noise,
         std::vector<int>{0, num_nodes - 1});

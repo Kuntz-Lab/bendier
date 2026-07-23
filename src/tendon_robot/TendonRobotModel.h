@@ -14,24 +14,17 @@ inline int TendonRobotNumNodes(int num_discs, int num_between_nodes) {
     return num_discs + (num_discs - 1) * num_between_nodes;
 }
 
-enum class RoutingAngleFunction {
-    CONSTANT = 0, // TODO should change these over the whole repo to be "STRAIGHT" and "HELIX"
-    LINEAR = 1
-};
-
-// TODO we can eliminate the enum above very simply just by setting total angle to 0 for straight tendons, much cleaner 
 struct RoutingFunctionParams {
     double angle_offset = 0.0;  // Starting angle (radians)
-    double total_angle = 0.0;   // For LINEAR: total angle change across the rod
+    double total_angle = 0.0;   // Total angle change across the rod (0 for a straight tendon)
 };
 
-struct TendonInput {
-    std::vector<RoutingAngleFunction> functions;
+struct TendonRoutingInput {
     std::vector<RoutingFunctionParams> params;
     double routing_radius;
 };
 
-// TODO I think this might could use restructurin somehow maybe a bit cleaner but not sure how yet
+// TODO I think this might could use restructuring somehow but not sure how yet
 struct TendonConfig {
     int num_discs;
     int num_tendons;
@@ -61,12 +54,12 @@ public:
         double rod_length,
         int num_discs,
         int num_between_nodes,
-        TendonInput tendon_input,
+        TendonRoutingInput tendon_input,
         const gtsam::Matrix6& K_inv,
         gtsam::SharedDiagonal strain_noise,
         gtsam::SharedDiagonal stress_noise,
         gtsam::SharedDiagonal displacement_constraint_noise,
-        std::vector<double> axial_stiffness,  // TODO rename
+        double tendon_stiffness,
         gtsam::Pose3 base_pose_mean,
         gtsam::SharedDiagonal base_pose_noise,
         const std::vector<int>& external_wrench_node_indices);  // Nodes that have a true external wrench variable
@@ -94,7 +87,7 @@ public:
         const gtsam::Marginals& marginals) const;
 
 private:
-    void init_tendon_disc_config(TendonInput tendon_input);
+    void init_tendon_disc_config(TendonRoutingInput tendon_input);
 
     void compute_reference_lengths();
 
@@ -119,7 +112,7 @@ private:
 
     TendonConfig tendon_config_;
 
-    std::vector<double> axial_stiffness_;      // [tendon]
+    double tendon_stiffness_;
     std::vector<double> reference_lengths_;    // [tendon]
 
     std::vector<bool> is_external_wrench_node_;

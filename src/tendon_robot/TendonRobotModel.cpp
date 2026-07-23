@@ -20,12 +20,12 @@ TendonRobotModel::TendonRobotModel(
     double rod_length,
     int num_discs,
     int num_between_nodes,
-    TendonInput tendon_input,
+    TendonRoutingInput tendon_input,
     const Matrix6& K_inv,
     SharedDiagonal strain_noise,
     SharedDiagonal stress_noise,
     SharedDiagonal displacement_constraint_noise,
-    std::vector<double> axial_stiffness, // TODO you should just make this a single double and have it be part of tendon input
+    double tendon_stiffness,
     Pose3 base_pose_mean,
     SharedDiagonal base_pose_noise,
     const std::vector<int>& external_wrench_node_indices)
@@ -33,28 +33,13 @@ TendonRobotModel::TendonRobotModel(
     rod_length_(rod_length),
     num_discs_(num_discs),
     num_nodes_(TendonRobotNumNodes(num_discs, num_between_nodes)),
-    num_tendons_(static_cast<int>(tendon_input.functions.size())),
+    num_tendons_(static_cast<int>(tendon_input.params.size())),
     stress_noise_(stress_noise),
     displacement_constraint_noise_(displacement_constraint_noise),
     base_pose_mean_(base_pose_mean),
-    base_pose_noise_(base_pose_noise)
+    base_pose_noise_(base_pose_noise),
+    tendon_stiffness_(tendon_stiffness)
 {
-    if (tendon_input.params.size() != tendon_input.functions.size())
-        throw std::invalid_argument(
-            "TendonRobotModel: tendon_input.params and .functions must be the same size");
-    
-    // Dont need this if axial stiffness is a scalar
-    if (axial_stiffness.empty()) {
-        // Rigid (negligible-stretch) default -- see header comment.
-        constexpr double kDefaultRigidAxialStiffness = 1e5;  // N
-        axial_stiffness_.assign(num_tendons_, kDefaultRigidAxialStiffness);
-    } else if (static_cast<int>(axial_stiffness.size()) != num_tendons_) {
-        throw std::invalid_argument(
-            "TendonRobotModel: axial_stiffness must be empty or match tendon_input.functions in size");
-    } else {
-        axial_stiffness_ = std::move(axial_stiffness);
-    }
-
     init_tendon_disc_config(tendon_input);
     compute_reference_lengths();
 
@@ -84,8 +69,7 @@ TendonRobotModel::TendonRobotModel(
     });
 }
 
-// TODO do we have test coverage for this? We definitly should 
-void TendonRobotModel::init_tendon_disc_config(TendonInput routing) {
+void TendonRobotModel::init_tendon_disc_config(TendonRoutingInput routing) {
     tendon_config_.num_discs = num_discs_;
     tendon_config_.num_tendons = num_tendons_;
     tendon_config_.disc_pose_idx.reserve(num_discs_);
@@ -113,15 +97,8 @@ void TendonRobotModel::init_tendon_disc_config(TendonInput routing) {
         std::vector<Vector3> holes(num_tendons_);
 
         for (int tendon_idx = 0; tendon_idx < num_tendons_; ++tendon_idx) {
-            double theta;
-
-            if (routing.functions[tendon_idx] == RoutingAngleFunction::CONSTANT) {
-                theta = routing.params[tendon_idx].angle_offset;
-            } else if (routing.functions[tendon_idx] == RoutingAngleFunction::LINEAR) {
-                theta = routing.params[tendon_idx].angle_offset + s * routing.params[tendon_idx].total_angle;
-            } else {
-                theta = 0.0;
-            }
+            double theta = routing.params[tendon_idx].angle_offset
+                + s * routing.params[tendon_idx].total_angle;
 
             double x = routing.routing_radius * std::cos(theta);
             double y = routing.routing_radius * std::sin(theta);
@@ -144,12 +121,9 @@ void TendonRobotModel::init_tendon_disc_config(TendonInput routing) {
             tendon_config_.no_disc_pose_idx.push_back(i);
 }
 
-// TODO test coverage? Or somehow verify that this is correct? could do a solve with zero tension/wrench and check it matches
 void TendonRobotModel::compute_reference_lengths() {
     // Geometric tendon length in the straight, untwisted reference
-    // configuration (identity rotation, poses spaced along z by arclength).
-    // Constant per tendon -- used by TendonDisplacementFactor's predicted
-    // displacement formula.
+    // Note this will NOT work for precurved backbones or otherwise.
     reference_lengths_.assign(num_tendons_, 0.0);
 
     for (int disc_idx = 0; disc_idx + 1 < num_discs_; ++disc_idx) {
@@ -258,11 +232,7 @@ NonlinearFactorGraph TendonRobotModel::build_graph() const
             stress_noise_));
     }
 
-    // Always-on physics constraint relating each tendon's base displacement
-    // to the routed hole geometry and elastic stretch. With no external
-    // prior placed on the displacements variable, this is a no-op leaf that
-    // doesn't affect poses/tensions/wrenches -- the solver is what actually
-    // "measures" displacement, via a PriorFactor<Vector> on get_displacements_key().
+    // Factor that constrains the total tendon length given a displacement prior
     std::vector<Key> disc_pose_keys;
     disc_pose_keys.reserve(num_discs_);
     for (int disc_idx = 0; disc_idx < num_discs_; ++disc_idx)
@@ -274,7 +244,7 @@ NonlinearFactorGraph TendonRobotModel::build_graph() const
         get_displacements_key(),
         tendon_config_.hole_locations,
         reference_lengths_,
-        axial_stiffness_,
+        tendon_stiffness_,
         displacement_constraint_noise_));
 
     return graph;
@@ -293,8 +263,6 @@ void TendonRobotModel::get_J_pose_tensions(const Marginals& marginals, TendonRob
 }
 
 void TendonRobotModel::get_J_pose_displacements(const Marginals& marginals, TendonRobotMarginals& out) const {
-    // Same regression-coefficient trick as get_J_pose_tensions, just against
-    // the displacements variable instead of tensions.
     Key X = get_displacements_key();
     Key T = rod_->get_pose_key(-1);
     JointMarginal joint = marginals.jointMarginalCovariance({X, T});
@@ -306,10 +274,6 @@ void TendonRobotModel::get_J_pose_displacements(const Marginals& marginals, Tend
 }
 
 void TendonRobotModel::get_J_tension_displacements(const Marginals& marginals, TendonRobotMarginals& out) const {
-    // Same regression-coefficient trick again: sensitivity of tension's
-    // posterior mean to the displacement variable's (commanded) mean. Used
-    // by callers (e.g. the interactive app) to predict, before committing to
-    // a displacement change, whether it would push tension negative.
     Key Q = get_tensions_key();
     Key X = get_displacements_key();
     JointMarginal joint = marginals.jointMarginalCovariance({Q, X});
@@ -346,6 +310,7 @@ TendonRobotMarginals TendonRobotModel::get_marginals(
         m.external_wrenches[i] = wrench;
     }
 
+    // All the Jacobians we care about 
     get_J_pose_tensions(marginals, m);
     get_J_pose_displacements(marginals, m);
     get_J_tension_displacements(marginals, m);

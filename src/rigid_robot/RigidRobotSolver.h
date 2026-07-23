@@ -41,8 +41,7 @@ class RigidRobotSolver : public SolverBase<RigidRobotModel> {
 public:
     explicit RigidRobotSolver(const RigidRobotSolverConfig& config);
 
-    // Solve given priors on any of these quantities, often just with single joint vector prior
-    // TODO: why is there an "enable_wrench_sensing" option in the solver config if the wrench prior is optional here? Shouldn't it be required if enabled?
+    // Solve given priors, often just with single joint vector prior.
     Solution<RigidRobotModel::ModelMarginals> solve(
         const VectorXGaussian& joint_prior,
         const std::optional<Vector6Gaussian>& tip_wrench_prior = std::nullopt,

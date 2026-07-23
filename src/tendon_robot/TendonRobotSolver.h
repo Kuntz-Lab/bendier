@@ -19,10 +19,9 @@ struct TendonRobotSolverConfig {
         double sigma_small_moment,
         double sigma_base_pose_pos,
         double sigma_base_pose_rot,
-        const TendonInput& tendon_input,
+        const TendonRoutingInput& tendon_input,
         double sigma_displacement_constraint = 1e-6,
-        const std::vector<double>& axial_stiffness = {},
-        double sigma_tension_nonneg = 0.1,
+        double tendon_stiffness = 1e5,
         const SolverBaseConfig& base = {})
     :   base(base),
         rod_length(rod_length),
@@ -36,7 +35,7 @@ struct TendonRobotSolverConfig {
         sigma_base_pose_pos(sigma_base_pose_pos),
         sigma_base_pose_rot(sigma_base_pose_rot),
         sigma_displacement_constraint(sigma_displacement_constraint),
-        axial_stiffness(axial_stiffness),
+        tendon_stiffness(tendon_stiffness),
         tendon_input(tendon_input)
     {}
 
@@ -54,14 +53,13 @@ struct TendonRobotSolverConfig {
     double sigma_base_pose_pos;
     double sigma_base_pose_rot;
 
-    // Tightness of the displacement-constraint factor 
     // Validity of:  displacement == predicted(poses, tensions)
     double sigma_displacement_constraint;
 
-    // Axial stiffness (EA) per tendon; empty defaults to a rigid tendon.
-    std::vector<double> axial_stiffness; // TODO rename
+    // Axial stiffness of all tendons; large default is effectively rigid.
+    double tendon_stiffness;
 
-    TendonInput tendon_input;
+    TendonRoutingInput tendon_input;
 };
 
 class TendonRobotSolver : public SolverBase<TendonRobotModel> {

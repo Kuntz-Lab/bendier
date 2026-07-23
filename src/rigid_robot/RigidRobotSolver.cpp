@@ -30,7 +30,6 @@ Solution<RigidRobotModel::ModelMarginals> RigidRobotSolver::solve(
     const std::optional<VectorXGaussian>& joint_torque_meas,
     const std::optional<Pose3Gaussian>& tip_pose_prior)
 {
-    // TODO this is likely where we would check if either tip_wrench_prior or joint_torque_meas is given if enable_wrench_sensing is true, don't need to expose a setter etc. for that.
     if (joint_prior.mean.size() != model_->get_num_joints())
         throw std::invalid_argument("RigidRobotSolver: joint_prior size must match num_joints");
 
@@ -70,7 +69,11 @@ Solution<RigidRobotModel::ModelMarginals> RigidRobotSolver::solve(
             noiseModel::Gaussian::Covariance(tip_pose_prior->cov)));
 
     if (joint_torque_meas) {
-        // TODO: this seems a little hacky
+        // Each joint gets its own independent 1-D RigidJointTorqueFactor, so
+        // only the diagonal of joint_torque_meas->cov is used here -- any
+        // off-diagonal correlation between joints in the supplied covariance
+        // is silently ignored, since there's no single factor type spanning
+        // all joints to encode it.
         int num_joints = model_->get_num_joints();
         if (joint_torque_meas->mean.size() != num_joints)
             throw std::invalid_argument(

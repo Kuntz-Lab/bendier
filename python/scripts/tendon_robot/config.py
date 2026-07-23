@@ -1,6 +1,6 @@
 import numpy as np
 
-from bendier import TendonRobotSolverConfig, TendonInput, RoutingAngleFunction, RoutingFunctionParams
+from bendier import TendonRobotSolverConfig, TendonRoutingInput, RoutingFunctionParams
 
 
 def get_K_inv():
@@ -29,16 +29,9 @@ def get_K_inv():
 
 
 def get_tendon_input():
-    tendon_input = TendonInput()
+    tendon_input = TendonRoutingInput()
 
     tendon_input.routing_radius = 0.01
-
-    tendon_input.functions = [
-        RoutingAngleFunction.LINEAR,
-        RoutingAngleFunction.CONSTANT,
-        RoutingAngleFunction.CONSTANT,
-        RoutingAngleFunction.CONSTANT
-    ]
 
     tendon_input.params = [
         RoutingFunctionParams(angle_offset=0.0,           total_angle=2 * np.pi),
@@ -88,10 +81,9 @@ def get_dexterous_tendon_input():
       on axial pretension, which is what makes the redundant motion
       visible instead of nearly inert.
     """
-    tendon_input = TendonInput()
+    tendon_input = TendonRoutingInput()
 
     tendon_input.routing_radius = 0.01
-    tendon_input.functions = [RoutingAngleFunction.LINEAR] * 4
     tendon_input.params = [
         RoutingFunctionParams(angle_offset=np.pi / 2,     total_angle=np.pi),
         RoutingFunctionParams(angle_offset=np.pi / 2,     total_angle=-np.pi),

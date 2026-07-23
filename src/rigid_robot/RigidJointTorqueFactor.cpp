@@ -31,7 +31,6 @@ Vector RigidJointTorqueFactor::evaluateError(
     Vector6 transported = transform_wrench_translation(
         tip_wrench, pose_tip, pose_child, H_wrench, H_pose_tip, H_pose_child);
     
-    // TODO don't we have something in wrench transforms to do this rotation?
     Matrix36 d_rot_d_pose_child;
     Rot3 rot = pose_child.rotation(d_rot_d_pose_child);
 

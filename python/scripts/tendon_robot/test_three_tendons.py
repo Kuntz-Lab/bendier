@@ -9,17 +9,14 @@ NUM_TENDONS = 3
 
 
 def get_tendon_input():
-    tendon_input = bendier.TendonInput()
+    tendon_input = bendier.TendonRoutingInput()
     tendon_input.routing_radius = 0.01
 
     angles = np.linspace(0, 2 * np.pi, NUM_TENDONS, endpoint=False)
 
     # Tendon 0 spirals a full turn around the backbone to bend the rod; the
-    # rest run straight, evenly spaced around the disc to counteract it.
-    tendon_input.functions = (
-        [bendier.RoutingAngleFunction.LINEAR]
-        + [bendier.RoutingAngleFunction.CONSTANT] * (NUM_TENDONS - 1)
-    )
+    # rest run straight (total_angle=0.0), evenly spaced around the disc to
+    # counteract it.
     tendon_input.params = [bendier.RoutingFunctionParams(angle_offset=0.0, total_angle=2 * np.pi)] + [
         bendier.RoutingFunctionParams(angle_offset=float(angle), total_angle=0.0)
         for angle in angles[1:]

@@ -24,10 +24,6 @@ void bind_rigid_robot(py::module& m) {
         .BIND_FIELD(RigidJointSpec, axis)
         .BIND_FIELD(RigidJointSpec, type);
 
-    py::class_<RigidLinkState>(m, "RigidLinkState")
-        .def(py::init<>())
-        .BIND_FIELD(RigidLinkState, pose);
-
     py::class_<RigidRobotMarginals>(m, "RigidRobotMarginals")
         .def(py::init<>())
         .BIND_FIELD(RigidRobotMarginals, links)

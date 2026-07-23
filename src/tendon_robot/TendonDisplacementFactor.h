@@ -13,7 +13,7 @@ public:
         gtsam::Key displacements_key,
         std::vector<std::vector<gtsam::Point3>> hole_locations,  // [disc][tendon]
         std::vector<double> reference_lengths,                    // [tendon]
-        std::vector<double> axial_stiffness,                      // [tendon] // TODO axis stiffness doesn't need to be a vector for now
+        double tendon_stiffness,
         const gtsam::SharedNoiseModel& model);
 
     gtsam::Vector unwhitenedError(
@@ -24,5 +24,5 @@ private:
     int num_discs_;
     std::vector<std::vector<gtsam::Point3>> hole_locations_;
     std::vector<double> reference_lengths_;
-    std::vector<double> axial_stiffness_;  // TODO just call this "tendon_stiffness" or "k_tendon" or something
+    double tendon_stiffness_;
 };
