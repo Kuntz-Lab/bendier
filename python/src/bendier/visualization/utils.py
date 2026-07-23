@@ -1,3 +1,4 @@
+# TODO: review this file
 """Shared helpers for the viser-based interactive plotters.
 
 Geared toward viser's persistent-scene-graph model:

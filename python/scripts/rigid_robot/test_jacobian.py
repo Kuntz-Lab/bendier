@@ -1,3 +1,4 @@
+# TODO: review this file
 """Numerical check of RigidRobotMarginals.J_tip_joints.
 
 J_tip_joints is derived from the solved factor graph's marginal covariances

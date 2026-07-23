@@ -1,3 +1,4 @@
+# TODO: review this file
 import numpy as np
 
 # Kuka LBR iiwa 7 R800 -- 7-DOF (redundant for a 6-DOF task pose, so it has a

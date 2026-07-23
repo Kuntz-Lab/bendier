@@ -30,6 +30,7 @@ Solution<RigidRobotModel::ModelMarginals> RigidRobotSolver::solve(
     const std::optional<VectorXGaussian>& joint_torque_meas,
     const std::optional<Pose3Gaussian>& tip_pose_prior)
 {
+    // TODO this is likely where we would check if either tip_wrench_prior or joint_torque_meas is given if enable_wrench_sensing is true, don't need to expose a setter etc. for that.
     if (joint_prior.mean.size() != model_->get_num_joints())
         throw std::invalid_argument("RigidRobotSolver: joint_prior size must match num_joints");
 
@@ -44,18 +45,13 @@ Solution<RigidRobotModel::ModelMarginals> RigidRobotSolver::solve(
             "tip_wrench_prior nor joint_torque_meas was given -- the tip "
             "wrench variable would be completely unconstrained");
 
-    // The default all-zero-joints initial guess (from SolverBase::run_solve
-    // only computing it once, lazily) can be a poor cold start for a rigid
-    // chain -- unlike a Cosserat rod's straight-line default, a robot's
-    // plausible pose depends entirely on the joint values, and compounding a
-    // large rotation error down several links under tight offset/chain
-    // priors can stall Dogleg. Warm-start from the joint prior's own mean
-    // instead, via forward kinematics.
+    // Fir first solve, we have to get the initial default values from the model 
     if (warm_start_.empty())
         warm_start_ = model_->get_initial_values(std::nullopt, joint_prior.mean);
 
+    // Build prior factors from the user inputs
     NonlinearFactorGraph priors;
-
+    
     priors.add(PriorFactor<Vector>(
         model_->get_joint_vector_key(),
         joint_prior.mean,
@@ -74,6 +70,7 @@ Solution<RigidRobotModel::ModelMarginals> RigidRobotSolver::solve(
             noiseModel::Gaussian::Covariance(tip_pose_prior->cov)));
 
     if (joint_torque_meas) {
+        // TODO: this seems a little hacky
         int num_joints = model_->get_num_joints();
         if (joint_torque_meas->mean.size() != num_joints)
             throw std::invalid_argument(

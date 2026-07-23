@@ -45,6 +45,9 @@ void bind_tendon_robot(py::module& m) {
                 double, double,
                 double, double,
                 const TendonInput&,
+                double,
+                const std::vector<double>&,
+                double,
                 const SolverBaseConfig&>(),
             py::arg("rod_length"),
             py::arg("num_discs"),
@@ -57,6 +60,9 @@ void bind_tendon_robot(py::module& m) {
             py::arg("sigma_base_pose_pos"),
             py::arg("sigma_base_pose_rot"),
             py::arg("tendon_input"),
+            py::arg("sigma_displacement_constraint") = 1e-6,
+            py::arg("axial_stiffness") = std::vector<double>{},
+            py::arg("sigma_tension_nonneg") = 0.1,
             py::arg("base") = SolverBaseConfig{});
 
     py::class_<TendonRobotMarginals>(m, "TendonRobotMarginals")
@@ -65,7 +71,10 @@ void bind_tendon_robot(py::module& m) {
         .BIND_FIELD(TendonRobotMarginals, tendon_config)
         .BIND_FIELD(TendonRobotMarginals, external_wrenches)
         .BIND_FIELD(TendonRobotMarginals, tensions)
-        .BIND_FIELD(TendonRobotMarginals, J_pose_tensions);
+        .BIND_FIELD(TendonRobotMarginals, displacements)
+        .BIND_FIELD(TendonRobotMarginals, J_pose_tensions)
+        .BIND_FIELD(TendonRobotMarginals, J_pose_displacements)
+        .BIND_FIELD(TendonRobotMarginals, J_tension_displacements);
 
     bind_solution<TendonRobotMarginals>(m, "TendonRobotSolution");
 
@@ -75,5 +84,6 @@ void bind_tendon_robot(py::module& m) {
              py::arg("tensions"),
              py::arg("tip_wrench")         = py::none(),
              py::arg("tip_position_meas")  = py::none(),
+             py::arg("displacement_meas")  = py::none(),
              py::call_guard<py::gil_scoped_release>());
 }

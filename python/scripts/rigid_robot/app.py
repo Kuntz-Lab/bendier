@@ -1,5 +1,4 @@
-import os
-import sys
+# TODO: review this file
 import threading
 
 import numpy as np
@@ -10,8 +9,10 @@ import bendier
 from bendier.visualization import RigidRobotPlotter
 from bendier.visualization import utils as viz_utils
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts", "rigid_robot"))
-from config import (  # noqa: E402
+# Running this file directly (`python app.py`) puts its own directory first
+# on sys.path automatically, so config.py -- right next to this file -- is
+# importable with no manual path setup.
+from config import (
     load_urdf, home_config, build_joint_specs, build_base_calibration, build_tip_offset_calibration,
     DEFAULT_OFFSET_SIGMA_ROT, DEFAULT_OFFSET_SIGMA_POS)
 
@@ -70,15 +71,6 @@ def null_space_vector(J, prev_vec=None):
     return null_vec
 
 
-def format_solve_stats(meta, avg_total_ms):
-    return (
-        f"iter: {meta.iterations}   err: {meta.error:.2e}\n"
-        f"build: {meta.build_time_ms:.2f} ms   opt: {meta.optimize_time_ms:.2f} ms\n"
-        f"marg: {meta.marginalize_time_ms:.2f} ms   extr: {meta.extract_time_ms:.2f} ms\n"
-        f"total: {meta.total_time_ms:.2f} ms   avg: {avg_total_ms:.2f} ms"
-    )
-
-
 def format_joint_torques(joint_torques, joint_names):
     stds = np.sqrt(np.diag(joint_torques.cov))
     return "\n".join(
@@ -86,10 +78,11 @@ def format_joint_torques(joint_torques, joint_names):
         for name, mean, std in zip(joint_names, joint_torques.mean, stds))
 
 
-class RigidForwardSimApp:
+class RigidRobotApp:
     def __init__(self, server: viser.ViserServer):
         self.server = server
-        viz_utils.setup_default_lighting(server)
+        # Lighting is set up by RigidRobotPlotter (via BasePlotter) once
+        # it's constructed below -- no need to duplicate it here.
 
         self.urdf = load_urdf()
         server.scene.add_frame("/robot", show_axes=False)
@@ -101,16 +94,15 @@ class RigidForwardSimApp:
         self.joint_lo = np.array([self.limits[name][0] for name in self.joint_names])
         self.joint_hi = np.array([self.limits[name][1] for name in self.joint_names])
 
-        # See tendon_forward_sim.py's docstring on _solve_lock: viser
+        # See tendon_robot/app.py's docstring on _solve_lock: viser
         # dispatches GUI callbacks from a thread pool, and the solver isn't
         # safe to call concurrently on the same instance.
         self._solve_lock = threading.RLock()
-        self._solve_times = []
         self.solver = None       # built by _rebuild_solver below
         self.joint_axes = None   # local-frame joint axes, for the plotter
         self._last_solution = None
 
-        # See _set_sliders/tendon_forward_sim.py's docstring on the same
+        # See _set_sliders/tendon_robot/app.py's docstring on the same
         # pattern: setting several sliders as one atomic update suppresses
         # the per-slider solve_and_update() cascade each .value set would
         # otherwise trigger, so only one solve happens against the fully-
@@ -231,8 +223,6 @@ class RigidForwardSimApp:
         with server.gui.add_folder("Tip Pose"):
             self.tip_position_readout = server.gui.add_text(
                 "tip position", initial_value="", disabled=True)
-            self.solve_stats_readout = server.gui.add_text(
-                "solve stats", initial_value="", disabled=True)
 
         with server.gui.add_folder("Joint Torques (posterior)"):
             self.joint_torques_readout = server.gui.add_text(
@@ -398,7 +388,7 @@ class RigidForwardSimApp:
                 joint_specs, base_calibration, tip_offset_calibration,
                 enable_wrench_sensing=True)
             self.solver = bendier.RigidRobotSolver(config)
-            self._solve_times = []
+            self.plotter.reset_solve_stats()
             self._null_space_prev_vec = None
 
             self.solve_and_update()
@@ -454,11 +444,8 @@ class RigidForwardSimApp:
             self._reposition_tip_pose_gizmo(tip.mean)
             self.plotter.update(solution)
 
-            self._solve_times.append(solution.meta.total_time_ms)
             self.tip_position_readout.value = (
                 f"[{tip.mean[0, 3]:.4f}, {tip.mean[1, 3]:.4f}, {tip.mean[2, 3]:.4f}] m")
-            self.solve_stats_readout.value = format_solve_stats(
-                solution.meta, np.mean(self._solve_times))
             self.joint_torques_readout.value = format_joint_torques(
                 solution.marginals.joint_torques, self.joint_names)
 
@@ -466,7 +453,7 @@ class RigidForwardSimApp:
 def main():
     server = viser.ViserServer()
     print("Open the URL above in a browser, then drag the sliders in the GUI panel.")
-    RigidForwardSimApp(server)
+    RigidRobotApp(server)
     server.sleep_forever()
 
 

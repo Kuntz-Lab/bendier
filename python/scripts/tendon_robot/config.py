@@ -54,7 +54,7 @@ def get_dexterous_tendon_input():
     """Four tendons, evenly spaced 90 degrees apart, each spiraling a full
     turn (2*pi) with alternating handedness (0/180 wind one way, 90/270 the
     other) -- a symmetric "cross-wound" pattern. Used only by the
-    interactive app (python/apps/tendon_forward_sim.py), not the batch
+    interactive app (python/scripts/tendon_robot/app.py), not the batch
     sims/tests, which are tuned against get_tendon_input()'s routing.
 
     Empirically compared against get_tendon_input() and several other

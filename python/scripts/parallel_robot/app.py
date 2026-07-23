@@ -1,5 +1,3 @@
-import os
-import sys
 import threading
 
 import numpy as np
@@ -10,8 +8,10 @@ import bendier
 from bendier.visualization import ParallelRobotPlotter
 from bendier.visualization.utils import pose_to_wxyz
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts", "parallel_robot"))
-from config import get_config, get_base_poses, platform_z_offset  # noqa: E402
+# Running this file directly (`python app.py`) puts its own directory first
+# on sys.path automatically, so config.py -- right next to this file -- is
+# importable with no manual path setup.
+from config import get_config, get_base_poses, platform_z_offset
 
 ROD_LENGTH_MIN, ROD_LENGTH_MAX, ROD_LENGTH_STEP = 0.3, 0.9, 0.005
 ROD_LENGTH_INITIAL = 0.6
@@ -40,15 +40,6 @@ FORCE_SIGMA_INITIAL = 0.001
 IK_DAMPING = 1e-2
 
 
-def format_solve_stats(meta, avg_total_ms):
-    return (
-        f"iter: {meta.iterations}   err: {meta.error:.2e}\n"
-        f"build: {meta.build_time_ms:.2f} ms   opt: {meta.optimize_time_ms:.2f} ms\n"
-        f"marg: {meta.marginalize_time_ms:.2f} ms   extr: {meta.extract_time_ms:.2f} ms\n"
-        f"total: {meta.total_time_ms:.2f} ms   avg: {avg_total_ms:.2f} ms"
-    )
-
-
 def damped_gauss_newton_step(J, error, damping):
     JTJ = J.T @ J
     A = JTJ + (damping ** 2) * np.eye(JTJ.shape[0])
@@ -56,7 +47,7 @@ def damped_gauss_newton_step(J, error, damping):
     return np.linalg.solve(A, b)
 
 
-class ParallelForwardSimApp:
+class ParallelRobotApp:
     def __init__(self, server: viser.ViserServer):
         self.server = server
         self.solver = bendier.ParallelRobotSolver(get_config())
@@ -73,7 +64,6 @@ class ParallelForwardSimApp:
         # the *same* thread, which would otherwise deadlock against a plain
         # Lock we're already holding.
         self._solve_lock = threading.RLock()
-        self._solve_times = []
 
         # IK gizmo state -- see _ik_step/_reposition_ik_gizmo. _last_solution
         # is the Jacobian source for the next IK tick (always exactly
@@ -122,8 +112,6 @@ class ParallelForwardSimApp:
         with server.gui.add_folder("Solution"):
             self.platform_position_readout = server.gui.add_text(
                 "platform position", initial_value="", disabled=True)
-            self.solve_stats_readout = server.gui.add_text(
-                "solve stats", initial_value="", disabled=True)
             self.status_readout = server.gui.add_text(
                 "status", initial_value="ok", disabled=True)
             reset_solver = server.gui.add_button("Reset solver")
@@ -184,7 +172,7 @@ class ParallelForwardSimApp:
         # than trying to repair whatever internal state it's in.
         with self._solve_lock:
             self.solver = bendier.ParallelRobotSolver(get_config())
-            self._solve_times = []
+            self.plotter.reset_solve_stats()
             self._set_sliders(
                 [(s, ROD_LENGTH_INITIAL) for s in self.rod_length_sliders]
                 + [(s, 0.0) for s in self.force_sliders]
@@ -211,7 +199,7 @@ class ParallelForwardSimApp:
                 solution = self.solver.solve(
                     rod_lengths, self.rod_lengths_sigma_slider.value, wrench, None)
             except Exception as e:
-                print(f"[parallel_forward_sim] solve() failed, resetting solver: {e}")
+                print(f"[parallel_robot/app] solve() failed, resetting solver: {e}")
                 self.solver = bendier.ParallelRobotSolver(get_config())
                 self.status_readout.value = f"solve failed ({type(e).__name__}) -- solver reset"
                 # IK's Jacobian source must not point at a stale solve while
@@ -226,9 +214,6 @@ class ParallelForwardSimApp:
             platform_position = solution.marginals.platform_pose.mean[:3, 3]
             self.platform_position_readout.value = (
                 f"[{platform_position[0]:.4f}, {platform_position[1]:.4f}, {platform_position[2]:.4f}] m")
-            self._solve_times.append(solution.meta.total_time_ms)
-            self.solve_stats_readout.value = format_solve_stats(
-                solution.meta, np.mean(self._solve_times))
             self.status_readout.value = "ok"
 
             self._last_solution = solution
@@ -268,7 +253,7 @@ class ParallelForwardSimApp:
 def main():
     server = viser.ViserServer()
     print("Open the URL above in a browser, then drag the sliders in the GUI panel.")
-    ParallelForwardSimApp(server)
+    ParallelRobotApp(server)
     server.sleep_forever()
 
 

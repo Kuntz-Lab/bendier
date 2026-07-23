@@ -14,6 +14,7 @@
 #include "rigid_robot/RigidJointFactor.h"
 #include "rigid_robot/RigidJointTorqueFactor.h"
 #include "tendon_robot/TendonDiscWrenchFactor.h"
+#include "tendon_robot/TendonDisplacementFactor.h"
 #include "utils/WrenchTransforms.h"
 
 #include <cmath>
@@ -355,6 +356,205 @@ TEST(TendonDiscWrenchFactor, jacobians_interior_three_tendons) {
   values.insert(ext_wrench_k, wrench_1());
 
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(TendonDisplacementFactor, jacobians_two_discs) {
+  Key pose0_k = 1, pose1_k = 2, tensions_k = 3, displacements_k = 4;
+
+  auto holes0 = holes_at(0.005, 0.0, 4);
+  auto holes1 = holes_at(0.005, 0.2, 4);
+
+  TendonDisplacementFactor factor(
+      {pose0_k, pose1_k}, tensions_k, displacements_k,
+      {holes0, holes1},
+      {0.24, 0.25, 0.23, 0.26},
+      {1e5, 1.2e5, 0.9e5, 1.1e5},
+      noiseModel::Unit::Create(4));
+
+  Values values;
+  values.insert(pose0_k, pose_a());
+  values.insert(pose1_k, pose_b());
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5, 3.0}));
+  values.insert(displacements_k, tensions_of({0.001, -0.002, 0.0005, 0.0}));
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(TendonDisplacementFactor, jacobians_three_discs) {
+  Key pose0_k = 1, pose1_k = 2, pose2_k = 3, tensions_k = 4, displacements_k = 5;
+
+  auto holes0 = holes_at(0.005, 0.0, 4);
+  auto holes1 = holes_at(0.005, 0.2, 4);
+  auto holes2 = holes_at(0.005, 0.4, 4);
+
+  TendonDisplacementFactor factor(
+      {pose0_k, pose1_k, pose2_k}, tensions_k, displacements_k,
+      {holes0, holes1, holes2},
+      {0.24, 0.25, 0.23, 0.26},
+      {1e5, 1.2e5, 0.9e5, 1.1e5},
+      noiseModel::Unit::Create(4));
+
+  Values values;
+  values.insert(pose0_k, pose_a());
+  values.insert(pose1_k, pose_b());
+  values.insert(pose2_k, pose_c());
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5, 3.0}));
+  values.insert(displacements_k, tensions_of({0.001, -0.002, 0.0005, 0.0}));
+
+  // Exercises Jacobian accumulation on the shared middle disc pose (pose1),
+  // which participates in both the [0,1] and [1,2] segments.
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(TendonDisplacementFactor, jacobians_three_tendons) {
+  Key pose0_k = 1, pose1_k = 2, pose2_k = 3, tensions_k = 4, displacements_k = 5;
+
+  auto holes0 = holes_at(0.005, 0.0, 3);
+  auto holes1 = holes_at(0.005, 0.2, 3);
+  auto holes2 = holes_at(0.005, 0.4, 3);
+
+  TendonDisplacementFactor factor(
+      {pose0_k, pose1_k, pose2_k}, tensions_k, displacements_k,
+      {holes0, holes1, holes2},
+      {0.24, 0.25, 0.23},
+      {1e5, 1.2e5, 0.9e5},
+      noiseModel::Unit::Create(3));
+
+  Values values;
+  values.insert(pose0_k, pose_a());
+  values.insert(pose1_k, pose_b());
+  values.insert(pose2_k, pose_c());
+  values.insert(tensions_k, tensions_of({2.0, 1.5, 0.5}));
+  values.insert(displacements_k, tensions_of({0.001, -0.002, 0.0005}));
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(TendonDisplacementFactor, matches_expected_stretch_formula) {
+  // Straight, untwisted poses with identical hole routing at both discs --
+  // the geometric term (current length vs. reference length) cancels
+  // exactly, since these poses *are* the reference configuration. What's
+  // left is a pure, hand-computable elastic-stretch prediction:
+  // predicted_i = T_i * dz / EA_i (dz being the reference length here too).
+  Key pose0_k = 1, pose1_k = 2, tensions_k = 3, displacements_k = 4;
+
+  const double dz = 0.24;
+  auto holes = holes_at(0.005, 0.0, 4);  // same routing angle at both discs
+
+  const std::vector<double> reference_lengths(4, dz);  // == dz, hand-verified below
+  const std::vector<double> axial_stiffness = {1e5, 1.2e5, 0.9e5, 1.1e5};
+  const Vector tensions = tensions_of({2.0, 1.5, 0.5, 3.0});
+
+  TendonDisplacementFactor factor(
+      {pose0_k, pose1_k}, tensions_k, displacements_k,
+      {holes, holes},
+      reference_lengths,
+      axial_stiffness,
+      noiseModel::Unit::Create(4));
+
+  Values values;
+  values.insert(pose0_k, Pose3(Rot3::Identity(), Point3(0, 0, 0)));
+  values.insert(pose1_k, Pose3(Rot3::Identity(), Point3(0, 0, dz)));
+  values.insert(tensions_k, tensions);
+
+  Vector4 expected_stretch;
+  for (int i = 0; i < 4; ++i)
+    expected_stretch(i) = tensions(i) * dz / axial_stiffness[i];
+
+  // At displacement == the hand-computed prediction, the residual should be
+  // (near) exactly zero -- not just self-consistent with its own Jacobian.
+  values.insert(displacements_k, Vector(expected_stretch));
+  Vector error_at_prediction = factor.unwhitenedError(values);
+  EXPECT(assert_equal(Vector(Vector4::Zero()), error_at_prediction, 1e-9));
+
+  // At displacement == 0, the residual should be exactly -expected_stretch
+  // -- confirms the formula isn't trivially zero regardless of input.
+  values.update(displacements_k, Vector(Vector4::Zero()));
+  Vector error_at_zero = factor.unwhitenedError(values);
+  EXPECT(assert_equal(Vector(-expected_stretch), error_at_zero, 1e-9));
+}
+
+TEST(TendonDisplacementFactor, matches_expected_geometric_formula_at_zero_tension) {
+  // Complementary to matches_expected_stretch_formula: here tension is zero
+  // (elastic term vanishes) and pose1 is offset laterally from pose0 with no
+  // rotation, so every tendon's hole-to-hole segment is the same easily
+  // hand-computed vector (dx, 0, dz) regardless of routing radius/angle
+  // (the routing offset is identical on both discs and cancels in the
+  // difference) -- giving a Pythagorean l_geom = sqrt(dx^2 + dz^2), and a
+  // hand-verifiable predicted displacement = L_ref - l_geom.
+  Key pose0_k = 1, pose1_k = 2, tensions_k = 3, displacements_k = 4;
+
+  const double dz = 0.24, dx = 0.01;
+  auto holes = holes_at(0.005, 0.0, 4);
+
+  const std::vector<double> reference_lengths(4, dz);  // straight-line reference
+  const std::vector<double> axial_stiffness = {1e5, 1.2e5, 0.9e5, 1.1e5};
+
+  TendonDisplacementFactor factor(
+      {pose0_k, pose1_k}, tensions_k, displacements_k,
+      {holes, holes},
+      reference_lengths,
+      axial_stiffness,
+      noiseModel::Unit::Create(4));
+
+  Values values;
+  values.insert(pose0_k, Pose3(Rot3::Identity(), Point3(0, 0, 0)));
+  values.insert(pose1_k, Pose3(Rot3::Identity(), Point3(dx, 0, dz)));
+  values.insert(tensions_k, Vector(Vector4::Zero()));
+
+  double l_geom = std::sqrt(dx * dx + dz * dz);
+  Vector4 expected_geometric_term = Vector4::Constant(dz - l_geom);
+
+  values.insert(displacements_k, Vector(expected_geometric_term));
+  Vector error = factor.unwhitenedError(values);
+  EXPECT(assert_equal(Vector(Vector4::Zero()), error, 1e-9));
+}
+
+TEST(TendonDisplacementFactor, matches_simple_stretch_model_at_realistic_curvature) {
+  // Directly checks the physical quantity the user described: the tendon's
+  // current geometric span l_geom is itself the physically stretched
+  // length (it's under tension T right now), so the amount of *natural*
+  // (unstretched) cable that spool has fed out to reach it is
+  // l_geom / (1 + T/EA) -- the standard Hookean stretch relation solved
+  // for natural length. Predicted displacement is then reference length
+  // minus that natural length used: L_ref - l_geom/(1 + T/EA).
+  //
+  // This is the "exact" (l_geom-based) formula; the factor itself uses
+  // L_ref (not l_geom) in the elastic term as a deliberate simplification
+  // (see the header comment). At a realistic small curvature (l_geom close
+  // to L_ref) the two agree to second order in (T/EA)*(L_ref - l_geom),
+  // which this test confirms is genuinely tiny rather than just assumed.
+  Key pose0_k = 1, pose1_k = 2, tensions_k = 3, displacements_k = 4;
+
+  auto holes = holes_at(0.005, 0.0, 1);  // single tendon keeps this simple
+
+  const double dz = 0.24, dx = 0.002;  // small lateral offset -> realistic curvature
+  const double EA = 1e5;
+  const double tension = 4.0;
+
+  Pose3 pose0(Rot3::Identity(), Point3(0, 0, 0));
+  Pose3 pose1(Rot3::Identity(), Point3(dx, 0, dz));
+
+  const double l_geom = std::sqrt(dx * dx + dz * dz);  // current physical (stretched) span
+  const double L_ref = dz;                             // straight-line reference length
+
+  TendonDisplacementFactor factor(
+      {pose0_k, pose1_k}, tensions_k, displacements_k,
+      {holes, holes},
+      {L_ref}, {EA},
+      noiseModel::Unit::Create(1));
+
+  double natural_length_used = l_geom / (1.0 + tension / EA);
+  double displacement_from_simple_stretch_model = L_ref - natural_length_used;
+
+  Values values;
+  values.insert(pose0_k, pose0);
+  values.insert(pose1_k, pose1);
+  values.insert(tensions_k, tensions_of({tension}));
+  values.insert(displacements_k, tensions_of({displacement_from_simple_stretch_model}));
+
+  Vector error = factor.unwhitenedError(values);
+  EXPECT(std::abs(error(0)) < 1e-7);
 }
 
 TEST(RigidJointFactor, jacobians_revolute) {

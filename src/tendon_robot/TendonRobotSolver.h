@@ -20,6 +20,9 @@ struct TendonRobotSolverConfig {
         double sigma_base_pose_pos,
         double sigma_base_pose_rot,
         const TendonInput& tendon_input,
+        double sigma_displacement_constraint = 1e-6,
+        const std::vector<double>& axial_stiffness = {},
+        double sigma_tension_nonneg = 0.1,
         const SolverBaseConfig& base = {})
     :   base(base),
         rod_length(rod_length),
@@ -32,6 +35,8 @@ struct TendonRobotSolverConfig {
         sigma_small_moment(sigma_small_moment),
         sigma_base_pose_pos(sigma_base_pose_pos),
         sigma_base_pose_rot(sigma_base_pose_rot),
+        sigma_displacement_constraint(sigma_displacement_constraint),
+        axial_stiffness(axial_stiffness),
         tendon_input(tendon_input)
     {}
 
@@ -49,6 +54,13 @@ struct TendonRobotSolverConfig {
     double sigma_base_pose_pos;
     double sigma_base_pose_rot;
 
+    // Tightness of the displacement-constraint factor 
+    // Validity of:  displacement == predicted(poses, tensions)
+    double sigma_displacement_constraint;
+
+    // Axial stiffness (EA) per tendon; empty defaults to a rigid tendon.
+    std::vector<double> axial_stiffness; // TODO rename
+
     TendonInput tendon_input;
 };
 
@@ -59,7 +71,8 @@ public:
     Solution<TendonRobotModel::ModelMarginals> solve(
         const VectorXGaussian&                tensions,
         const std::optional<Vector6Gaussian>& tip_wrench         = std::nullopt,
-        const std::optional<Vector3Gaussian>& tip_position_meas  = std::nullopt);
+        const std::optional<Vector3Gaussian>& tip_position_meas  = std::nullopt,
+        const std::optional<VectorXGaussian>& displacement_meas  = std::nullopt);
 
 private:
     gtsam::SharedDiagonal small_wrench_noise_;

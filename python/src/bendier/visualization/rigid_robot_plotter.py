@@ -1,6 +1,8 @@
+# TODO: review this file
 import numpy as np
 
 from . import utils
+from .base_plotter import BasePlotter
 
 
 class RigidRobotMeshManager:
@@ -138,28 +140,25 @@ class RigidRobotMeshManager:
             self.update_joint_torques(marginals.links, joint_axes, marginals.joint_torques)
 
 
-class RigidRobotPlotter:
+class RigidRobotPlotter(BasePlotter):
     def __init__(self,
-                 server,
-                 joint_axes,
+                 server=None,
                  port=8080,
+                 joint_axes=None,
                  prefix="/rigid_robot",
                  plot_link_ellipsoids=True,
                  plot_tip_wrench=True,
                  plot_joint_torques=True,
                  moment_scale=0.2,
                  force_scale=0.1,
-                 torque_scale=0.3):
-        import viser
+                 torque_scale=0.3,
+                 show_solve_stats=True):
+        super().__init__(server=server, port=port, show_solve_stats=show_solve_stats)
 
-        if server is None:
-            server = viser.ViserServer(port=port)
-            print("Open the URL above in a browser to watch.")
-        self.server = server
         self.joint_axes = joint_axes
 
         self.mesh_manager = RigidRobotMeshManager(
-            server.scene,
+            self.server.scene,
             prefix=prefix,
             plot_link_ellipsoids=plot_link_ellipsoids,
             plot_tip_wrench=plot_tip_wrench,
@@ -171,3 +170,4 @@ class RigidRobotPlotter:
 
     def update(self, solution):
         self.mesh_manager.update(solution.marginals, self.joint_axes)
+        self.update_solve_stats(solution.meta)

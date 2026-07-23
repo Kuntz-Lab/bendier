@@ -1,3 +1,4 @@
+<!-- TODO: review this file -->
 <p align="center">
   <img src="images/logo.png" width="600" alt="BENDIER logo">
 </p>
@@ -215,12 +216,13 @@ bash run_ral_sims.bash
 When the chosen script runs successfully, you can visualize the simulation in `viser` by clicking the link output by the script (e.g. http://localhost:8080).
 Your browser will open showing real-time solution geometries for the selected model, as well as solution metadata.
 
-You can also run sever apps to visualize forward and inverse mechanics simulations in real-time:
+You can also run interactive apps to visualize forward and inverse mechanics simulations in real-time -- each robot's app lives alongside its batch scripts, as `app.py` in its own `python/scripts/<robot>/` folder:
 
 ```bash
-python apps/cosserat_rod_forward_sim.py
-python apps/tendon_forward_sim.py
-python apps/parallel_robot_forward_sim.py
+python scripts/cosserat_rod/app.py
+python scripts/tendon_robot/app.py
+python scripts/parallel_robot/app.py
+python scripts/rigid_robot/app.py
 ```
 
 These apps have sliders to control inputs, as well as draggable 3D frames to control the robot's base pose and tip pose for inverse mechanics visulaization. 

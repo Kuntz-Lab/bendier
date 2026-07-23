@@ -1,9 +1,9 @@
 import itertools
 
 import numpy as np
-import viser
 
 from . import utils
+from .base_plotter import BasePlotter
 from .cosserat_rod_plotter import CosseratRodMeshManager
 
 ROD_COLORS = [
@@ -15,7 +15,7 @@ PLATFORM_LEG_SIDES = 16
 TIP_FORCE_ARROW_SHAFT_RADIUS = 0.006
 
 
-class ParallelRobotPlotter:
+class ParallelRobotPlotter(BasePlotter):
     def __init__(self,
                  server=None,
                  port=8080,
@@ -24,13 +24,9 @@ class ParallelRobotPlotter:
                  plot_tip_force=True,
                  plot_base_wrenches=False,
                  plot_backbone_frames=False,
-                 plot_backbone_ellipsoids=True):
-
-        if server is None:
-            server = viser.ViserServer(port=port)
-            print("Open the URL above in a browser to watch.")
-        self.server = server
-        utils.setup_default_lighting(server)
+                 plot_backbone_ellipsoids=True,
+                 show_solve_stats=True):
+        super().__init__(server=server, port=port, show_solve_stats=show_solve_stats)
 
         self.rod_managers = None
 
@@ -155,6 +151,4 @@ class ParallelRobotPlotter:
 
         self.update_platform(solution.marginals)
         self.update_tip_force(solution.marginals, tip_force_gt)
-
-    def close(self):
-        pass
+        self.update_solve_stats(solution.meta)

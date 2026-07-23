@@ -26,12 +26,12 @@ Vector RigidJointTorqueFactor::evaluateError(
     OptionalMatrixType H2,
     OptionalMatrixType H3) const
 {
-    // No distributed load along a rigid link -- the wrench at every joint is
-    // just the tip wrench, transported to that joint's own location.
+    // Transport tip wrench into child link frame
     Matrix6 H_wrench, H_pose_tip, H_pose_child;
     Vector6 transported = transform_wrench_translation(
         tip_wrench, pose_tip, pose_child, H_wrench, H_pose_tip, H_pose_child);
-
+    
+    // TODO don't we have something in wrench transforms to do this rotation?
     Matrix36 d_rot_d_pose_child;
     Rot3 rot = pose_child.rotation(d_rot_d_pose_child);
 
@@ -44,8 +44,6 @@ Vector RigidJointTorqueFactor::evaluateError(
     Vector1 error;
     error(0) = axis_world.dot(component) - torque_meas_;
 
-    // d(tau)/d(transported): axis_world dotted into whichever half
-    // (moment/force) `component` was selected from.
     Matrix16 d_tau_d_transported = Matrix16::Zero();
     if (revolute) d_tau_d_transported.block<1,3>(0,0) = axis_world.transpose();
     else          d_tau_d_transported.block<1,3>(0,3) = axis_world.transpose();
@@ -53,8 +51,6 @@ Vector RigidJointTorqueFactor::evaluateError(
     if (H1) *H1 = d_tau_d_transported * H_pose_tip;
 
     if (H2) {
-        // pose_child affects tau two ways: through the transport target
-        // point, and through the axis direction itself.
         Matrix16 d_tau_d_pose_child_via_axis = component.transpose() * d_axis_world_d_rot * d_rot_d_pose_child;
         *H2 = d_tau_d_transported * H_pose_child + d_tau_d_pose_child_via_axis;
     }

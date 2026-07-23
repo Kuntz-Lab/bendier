@@ -1,9 +1,9 @@
 import itertools
 
 import numpy as np
-import viser
 
 from . import utils
+from .base_plotter import BasePlotter
 from .cosserat_rod_plotter import CosseratRodMeshManager
 
 TENDON_COLORS = [
@@ -14,7 +14,7 @@ DISC_SIDES = 32
 TIP_FORCE_ARROW_SHAFT_RADIUS = 0.0008
 
 
-class TendonRobotPlotter:
+class TendonRobotPlotter(BasePlotter):
     def __init__(self,
                  server=None,
                  port=8080,
@@ -22,18 +22,14 @@ class TendonRobotPlotter:
                  plot_tip_force=True,
                  plot_base_wrenches=False,
                  plot_backbone_frames=False,
-                 plot_backbone_ellipsoids=True):
-
-        if server is None:
-            server = viser.ViserServer(port=port)
-            print("Open the URL above in a browser to watch.")
-        self.server = server
-        utils.setup_default_lighting(server)
+                 plot_backbone_ellipsoids=True,
+                 show_solve_stats=True):
+        super().__init__(server=server, port=port, show_solve_stats=show_solve_stats)
 
         self.plot_tip_force = plot_tip_force
 
         self.rod_manager = CosseratRodMeshManager(
-            server.scene,
+            self.server.scene,
             plot_backbone_ellipsoids=plot_backbone_ellipsoids,
             plot_wrenches=plot_rod_wrenches,
             plot_base_wrench=plot_base_wrenches,
@@ -134,9 +130,7 @@ class TendonRobotPlotter:
         self.update_tendons(solution)
         self.update_discs(solution)
         self.update_tip_force(solution, tip_force_gt)
+        self.update_solve_stats(solution.meta)
 
         if p_desired is not None:
             self.update_p_desired(p_desired)
-
-    def close(self):
-        pass

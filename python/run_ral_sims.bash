@@ -8,7 +8,7 @@ export NUMEXPR_NUM_THREADS=1
 
 # Run all sims with same execution settings
 for sim in \
-scripts/cosserat/test_num_nodes.py \
+scripts/cosserat_rod/test_num_nodes.py \
 scripts/tendon_robot/test_nees.py \
 scripts/tendon_robot/test_tip_force.py \
 scripts/parallel_robot/test_tip_force.py

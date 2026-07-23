@@ -1,3 +1,4 @@
+// TODO: review this file
 #include "RigidRobotModel.h"
 #include "RigidJointTorqueFactor.h"
 #include "utils/ModelConcept.h"
@@ -108,11 +109,13 @@ NonlinearFactorGraph RigidRobotModel::build_graph() const
     NonlinearFactorGraph graph;
     Key joint_key = get_joint_vector_key();
 
+    // Base pose prior anchors the robot in the world frame 
     graph.add(PriorFactor<Pose3>(
         pose_keys_[0],
         Pose3(base_pose_calibration_.mean),
         noiseModel::Gaussian::Covariance(base_pose_calibration_.cov)));
-
+    
+    // Each links are connected by RigidJointFactors with priors for each static offset
     for (int i = 0; i < num_joints_; ++i) {
         graph.add(RigidJointFactor(
             pose_keys_[i],
@@ -130,24 +133,12 @@ NonlinearFactorGraph RigidRobotModel::build_graph() const
             noiseModel::Gaussian::Covariance(joint_specs_[i].offset_calibration.cov)));
     }
 
-    // Fixed (but uncertain) transform from the last actuated link out to the
-    // true end-effector/tool-tip pose. No joint motion is involved here --
-    // unlike RigidJointFactor's per-joint chain, this needs nothing but a
-    // plain built-in BetweenFactor between the last link and a dedicated
-    // tip_pose variable.
+    // Tip offset prior connects the last link to the tip frame
     graph.add(BetweenFactor<Pose3>(
         pose_keys_.back(),
         get_tip_pose_key(),
         Pose3(tip_offset_calibration_.mean),
         noiseModel::Gaussian::Covariance(tip_offset_calibration_.cov)));
-
-    // No internal physics factor needed for the tip wrench itself: with no
-    // distributed load along a rigid link, it's the same wrench at every
-    // joint, just transported (see RigidJointTorqueFactor) -- there's
-    // nothing to balance here the way CosseratStressFactor balances an
-    // elastic rod's internal stress node-to-node. The solver is entirely
-    // responsible for constraining it (tip-wrench prior and/or per-joint
-    // torque measurements).
 
     return graph;
 }
@@ -160,34 +151,35 @@ RigidRobotMarginals RigidRobotModel::get_marginals(
     out.links.resize(num_links_);
     out.offsets.resize(num_joints_);
 
+    // World frame link poses 
     for (int i = 0; i < num_links_; ++i) {
-        out.links[i].pose.mean = values.at<Pose3>(pose_keys_[i]).matrix();
-        out.links[i].pose.cov  = marginals.marginalCovariance(pose_keys_[i]);
+        out.links[i].mean = values.at<Pose3>(pose_keys_[i]).matrix();
+        out.links[i].cov  = marginals.marginalCovariance(pose_keys_[i]);
     }
 
+    // Calibration relative offsets
     for (int i = 0; i < num_joints_; ++i) {
         out.offsets[i].mean = values.at<Pose3>(offset_keys_[i]).matrix();
         out.offsets[i].cov  = marginals.marginalCovariance(offset_keys_[i]);
     }
 
+    // Joint vector posterior
     Key joint_key = get_joint_vector_key();
     out.joints.mean = values.at<Vector>(joint_key);
     out.joints.cov  = marginals.marginalCovariance(joint_key);
 
+    // Tip pose posterior
     Key tip_pose_key = get_tip_pose_key();
     out.tip_pose.mean = values.at<Pose3>(tip_pose_key).matrix();
     out.tip_pose.cov  = marginals.marginalCovariance(tip_pose_key);
 
-    {
-        // Same technique as TendonRobotModel::get_J_pose_tensions: for a
-        // locally-linear T = J*Q + noise relationship, Cov(T,Q) = J*Cov(Q,Q),
-        // so J = Sigma_TQ * Sigma_QQ^-1 (the marginal information of Q).
-        JointMarginal joint_marg = marginals.jointMarginalCovariance({joint_key, tip_pose_key});
-        Matrix sigma_TQ = joint_marg(tip_pose_key, joint_key);       // 6 x num_joints
-        Matrix sigma_QQ_inv = marginals.marginalInformation(joint_key);  // num_joints x num_joints
-        out.J_tip_joints = sigma_TQ * sigma_QQ_inv;
-    }
+    // Robot jacobian trick using the joint marginals
+    JointMarginal joint_marg = marginals.jointMarginalCovariance({joint_key, tip_pose_key});
+    Matrix sigma_TQ = joint_marg(tip_pose_key, joint_key);           // 6 x num_joints
+    Matrix sigma_QQ_inv = marginals.marginalInformation(joint_key);  // num_joints x num_joints
+    out.J_tip_joints = sigma_TQ * sigma_QQ_inv;
 
+    // Write wrench sensing results if enabled
     if (enable_wrench_sensing_) {
         Key wrench_key = get_tip_wrench_key();
         Vector6 tip_wrench_mean = values.at<Vector6>(wrench_key);
@@ -198,11 +190,8 @@ RigidRobotMarginals RigidRobotModel::get_marginals(
         tip_wrench.cov = tip_wrench_cov;
         out.tip_wrench = tip_wrench;
 
-        // Per-joint generalized force, projected from the tip wrench at the
-        // solved poses. Variance only propagates the tip wrench's own
-        // uncertainty through this projection's Jacobian (poses are held at
-        // their MAP estimate) -- reuses RigidJointTorqueFactor's own
-        // evaluateError/Jacobian rather than re-deriving the same math.
+        // Projected tip wrench onto each joint axis 
+        // TODO: we can do this with a single jacobian J^T * tip_wrench_cov * J, implement and test this later
         VectorXGaussian joint_torques;
         joint_torques.mean = Vector::Zero(num_joints_);
         joint_torques.cov = Matrix::Zero(num_joints_, num_joints_);

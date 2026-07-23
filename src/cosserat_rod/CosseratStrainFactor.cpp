@@ -103,24 +103,22 @@ Vector CosseratStrainFactor::evaluateError(
     OptionalMatrixType H3, 
     OptionalMatrixType H4) const 
 {
-    // Twist of p1 relative to p0, in frame p0. localCoordinates gives this
-    // directly with its correctly chain-ruled derivatives -- between()+Logmap()
-    // computes the same thing, but between()'s own H2 (w.r.t. its second
-    // argument) is always the identity matrix, so chaining it through Logmap's
-    // derivative via an explicit multiply is pure wasted work.
+    // Twist of p1 relative to p0, inverse of pose1 = pose0 * exp(ds * strain)
     Matrix6 d_twist_d_p0, d_twist_d_p1;
     Vector6 twist = p0.localCoordinates(p1, d_twist_d_p0, d_twist_d_p1);
 
-    // s0, s1 are world-frame, so rotate into each node's own body frame first.
+    // Stresses at endpoints are world-frame, so rotate into each node's own body frame first.
     Matrix6 d_s0body_d_s0, d_s0body_d_p0;
     Vector6 s0_body = spatial_to_body_wrench(s0, p0, d_s0body_d_s0, d_s0body_d_p0);
 
     Matrix6 d_s1body_d_s1, d_s1body_d_p1;
     Vector6 s1_body = spatial_to_body_wrench(s1, p1, d_s1body_d_s1, d_s1body_d_p1);
 
+    // Convert body stresses to strains using constitutive law (linear elasticity)
     Vector6 w0 = K_inv_ * s0_body + nominal_strain_;
     Vector6 w1 = K_inv_ * s1_body + nominal_strain_;
 
+    // Assuming linear strain along the rod, compute total twist using Magnus expansion
     Matrix6 d_strain_d_w0, d_strain_d_w1;
     Vector6 strain_pred = get_strain_magnus(
         w0,
@@ -129,7 +127,8 @@ Vector CosseratStrainFactor::evaluateError(
         num_magnus_terms_,
         &d_strain_d_w0, 
         &d_strain_d_w1);
-
+    
+    // It should be equal to the actual strain velocity
     Vector6 error = strain_pred -  twist / ds_;
 
     if (H1) {

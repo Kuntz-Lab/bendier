@@ -2,6 +2,7 @@
 
 #include <gtsam/base/Matrix.h>
 
+#include "TendonGeometry.h"
 #include "utils/WrenchTransforms.h"
 
 using namespace gtsam;
@@ -68,17 +69,20 @@ Vector TendonDiscWrenchFactor::unwhitenedError(
     for (int i = 0; i < tensions.size(); ++i) {
         Vector6 dT_prev;
         Matrix6 dP_prev, dPprev;
-
+        
+        // Wrench from tendon i from previous disc to this disc
         Vector6 w_prev = get_single_tendon_wrench(
             tensions[i], pose, pose_prev,
             holes_[i], holes_prev_[i],
             dT_prev, dP_prev, dPprev);
-
+        
+        // Accumulate wrench and Jacobians
         wrench_tendons += w_prev;
         Vector6 dT = dT_prev;
         d_wrench_d_pose      += dP_prev;
         d_wrench_d_pose_prev += dPprev;
-
+        
+        // Do it again for the next disc if this isn't the tip disc
         if (!is_tip_) {
             Vector6 dT_next;
             Matrix6 dP_next, dPnext;
@@ -97,6 +101,7 @@ Vector TendonDiscWrenchFactor::unwhitenedError(
         d_wrench_d_tensions.col(i) = dT;
     }
 
+    // If this disc has an external wrench variable, subtract it from the total
     Vector6 wrench_external = Vector6::Zero();
     if (has_external_wrench_)
         wrench_external = x.at<Vector6>(keys()[ext_wrench_idx]);
@@ -123,17 +128,10 @@ Vector6 TendonDiscWrenchFactor::get_single_tendon_wrench(
     OptionalJacobian<6, 6> H_p0,
     OptionalJacobian<6, 6> H_p1) const
 {
-    // TF body hole 1 location to frame 0 for differencing
-    Matrix36 d_h1w_d_p1;
-    Point3 h1w = p1.transformFrom(h1, d_h1w_d_p1);
-
-    Matrix36 d_h10_d_p0;
-    Matrix3 d_h10_d_h1w;
-    Point3 h10 = p0.transformTo(h1w, d_h10_d_p0, d_h10_d_h1w); // Hole 1 in frame 0
-
-    // Difference between two holes is direction of force
-    Vector3 diff = h10 - h0; // Both holes in frame 0
-    Matrix3 d_diff_d_h10 = Matrix3::Identity();
+    // Difference between the two holes (both expressed in frame 0) 
+    // This is the direction of the tendon force.
+    Matrix36 d_diff_d_p0, d_diff_d_p1;
+    Vector3 diff = tendon_hole_diff(p0, p1, h0, h1, d_diff_d_p0, d_diff_d_p1);
 
     Matrix3 d_dir_d_diff;
     Vector3 dir = normalize(diff, &d_dir_d_diff); // Frame 0
@@ -143,10 +141,11 @@ Vector6 TendonDiscWrenchFactor::get_single_tendon_wrench(
     Matrix31 d_force_d_tension = dir;
     Matrix33 d_force_d_dir = tension * Matrix3::Identity();
 
-    // Compute moment about frame 0 origin and combine to wrench
+    // Compute moment about frame 0 origin 
     Matrix3 d_moment_d_force;
     Vector3 moment = cross(h0, force, std::nullopt, d_moment_d_force); // Frame 0
 
+    // Assemble into body frame wrench
     Vector6 body;
     body << moment, force;
     Matrix63 d_body_d_moment = Matrix63::Zero();
@@ -158,20 +157,22 @@ Vector6 TendonDiscWrenchFactor::get_single_tendon_wrench(
     Matrix6 d_spatial_d_body, d_spatial_d_p0;
     Vector6 spatial = body_to_spatial_wrench(body, p0, d_spatial_d_body, d_spatial_d_p0);
 
+    // Scary but unit tested Jacobians
+    
     if (H_tension) {
         *H_tension = d_spatial_d_body * d_body_d_force * d_force_d_tension +
             d_spatial_d_body * d_body_d_moment * d_moment_d_force * d_force_d_tension;
     }
 
     if (H_p0) {
-        Matrix36 d_force_d_p0 = d_force_d_dir * d_dir_d_diff * d_diff_d_h10 * d_h10_d_p0;
+        Matrix36 d_force_d_p0 = d_force_d_dir * d_dir_d_diff * d_diff_d_p0;
         *H_p0 = d_spatial_d_p0 +
             d_spatial_d_body * d_body_d_force * d_force_d_p0 +
             d_spatial_d_body * d_body_d_moment * d_moment_d_force * d_force_d_p0;
     }
 
     if (H_p1) {
-        Matrix36 d_force_d_p1 = d_force_d_dir * d_dir_d_diff * d_diff_d_h10 * d_h10_d_h1w * d_h1w_d_p1;
+        Matrix36 d_force_d_p1 = d_force_d_dir * d_dir_d_diff * d_diff_d_p1;
         *H_p1 = d_spatial_d_body * d_body_d_force * d_force_d_p1 +
             d_spatial_d_body * d_body_d_moment * d_moment_d_force * d_force_d_p1;
     }

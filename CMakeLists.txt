@@ -1,3 +1,4 @@
+# TODO: review this file
 cmake_minimum_required(VERSION 3.18)
 project(bendier LANGUAGES CXX)
 
@@ -34,6 +35,8 @@ set(BENDIER_SOLVER_SOURCES
   src/rigid_robot/RigidRobotModel.cpp
   src/rigid_robot/RigidRobotSolver.cpp
   src/tendon_robot/TendonDiscWrenchFactor.cpp
+  src/tendon_robot/TendonDisplacementFactor.cpp
+  src/tendon_robot/TendonGeometry.cpp
   src/tendon_robot/TendonRobotModel.cpp
   src/tendon_robot/TendonRobotSolver.cpp
   src/utils/WrenchTransforms.cpp

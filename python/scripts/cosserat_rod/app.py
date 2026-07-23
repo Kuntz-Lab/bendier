@@ -1,5 +1,3 @@
-import os
-import sys
 import threading
 
 import numpy as np
@@ -8,8 +6,10 @@ import viser
 import bendier
 from bendier.visualization import CosseratRodPlotter
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts", "cosserat"))
-from config import get_config  # noqa: E402
+# Running this file directly (`python app.py`) puts its own directory first
+# on sys.path automatically, so config.py -- right next to this file -- is
+# importable with no manual path setup.
+from config import get_config
 
 MOMENT_MIN, MOMENT_MAX, MOMENT_STEP = -0.5, 0.5, 0.005
 FORCE_MIN, FORCE_MAX, FORCE_STEP = -1.0, 1.0, 0.01
@@ -26,16 +26,7 @@ FORCE_SIGMA_MIN, FORCE_SIGMA_MAX, FORCE_SIGMA_STEP = 0.0001, 0.5, 0.0001
 FORCE_SIGMA_INITIAL = 0.001
 
 
-def format_solve_stats(meta, avg_total_ms):
-    return (
-        f"iter: {meta.iterations}   err: {meta.error:.2e}\n"
-        f"build: {meta.build_time_ms:.2f} ms   opt: {meta.optimize_time_ms:.2f} ms\n"
-        f"marg: {meta.marginalize_time_ms:.2f} ms   extr: {meta.extract_time_ms:.2f} ms\n"
-        f"total: {meta.total_time_ms:.2f} ms   avg: {avg_total_ms:.2f} ms"
-    )
-
-
-class CosseratForwardSimApp:
+class CosseratRodApp:
     def __init__(self, server: viser.ViserServer):
         self.server = server
         self.solver = bendier.CosseratRodSolver(get_config())
@@ -51,7 +42,6 @@ class CosseratForwardSimApp:
         # the *same* thread, which would otherwise deadlock against a plain
         # Lock we're already holding.
         self._solve_lock = threading.RLock()
-        self._solve_times = []
         self._suppress_slider_solve = False
 
         self._build_gui()
@@ -92,8 +82,6 @@ class CosseratForwardSimApp:
         with server.gui.add_folder("Solution"):
             self.tip_position_readout = server.gui.add_text(
                 "tip position", initial_value="", disabled=True)
-            self.solve_stats_readout = server.gui.add_text(
-                "solve stats", initial_value="", disabled=True)
             self.status_readout = server.gui.add_text(
                 "status", initial_value="ok", disabled=True)
             reset_solver = server.gui.add_button("Reset solver")
@@ -138,7 +126,7 @@ class CosseratForwardSimApp:
         # than trying to repair whatever internal state it's in.
         with self._solve_lock:
             self.solver = bendier.CosseratRodSolver(get_config())
-            self._solve_times = []
+            self.plotter.reset_solve_stats()
             self._set_sliders(
                 [(s, 0.0) for s in self.moment_sliders + self.force_sliders]
                 + [(s, MOMENT_SIGMA_INITIAL) for s in self.moment_sigma_sliders]
@@ -163,7 +151,7 @@ class CosseratForwardSimApp:
             try:
                 solution = self.solver.solve(tip_wrench=tip_wrench)
             except Exception as e:
-                print(f"[cosserat_forward_sim] solve() failed, resetting solver: {e}")
+                print(f"[cosserat_rod/app] solve() failed, resetting solver: {e}")
                 self.solver = bendier.CosseratRodSolver(get_config())
                 self.status_readout.value = f"solve failed ({type(e).__name__}) -- solver reset"
                 return
@@ -173,16 +161,13 @@ class CosseratForwardSimApp:
             tip_position = solution.marginals.states[-1].pose.mean[:3, 3]
             self.tip_position_readout.value = (
                 f"[{tip_position[0]:.4f}, {tip_position[1]:.4f}, {tip_position[2]:.4f}] m")
-            self._solve_times.append(solution.meta.total_time_ms)
-            self.solve_stats_readout.value = format_solve_stats(
-                solution.meta, np.mean(self._solve_times))
             self.status_readout.value = "ok"
 
 
 def main():
     server = viser.ViserServer()
     print("Open the URL above in a browser, then drag the sliders in the GUI panel.")
-    CosseratForwardSimApp(server)
+    CosseratRodApp(server)
     server.sleep_forever()
 
 

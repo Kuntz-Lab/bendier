@@ -1,7 +1,7 @@
 import numpy as np
-import viser
 
 from . import utils
+from .base_plotter import BasePlotter
 
 BACKBONE_SIDES = 16
 END_PLATE_SIDES = 64
@@ -197,7 +197,7 @@ class CosseratRodMeshManager:
         self.update_backbone_frames(solution)
 
 
-class CosseratRodPlotter:
+class CosseratRodPlotter(BasePlotter):
     def __init__(self,
                  server=None,
                  port=8080,
@@ -211,19 +211,12 @@ class CosseratRodPlotter:
                  moment_scale=0.2,
                  force_scale=0.1,
                  base_plate_size=0.1,
-                 cartesian_frame_scale=0.03):
-
-        # Owns its own server if one isn't given, the same way a pyvista
-        # plotter owns its own window -- lets standalone scripts construct a
-        # plotter directly, with no separate viser import/setup of their own.
-        if server is None:
-            server = viser.ViserServer(port=port)
-            print("Open the URL above in a browser to watch.")
-        self.server = server
-        utils.setup_default_lighting(server)
+                 cartesian_frame_scale=0.03,
+                 show_solve_stats=True):
+        super().__init__(server=server, port=port, show_solve_stats=show_solve_stats)
 
         self.mesh_manager = CosseratRodMeshManager(
-            server.scene,
+            self.server.scene,
             plot_base_plate=plot_base_plate,
             plot_tip_plate=plot_tip_plate,
             plot_wrenches=plot_wrenches,
@@ -239,6 +232,4 @@ class CosseratRodPlotter:
 
     def update(self, solution):
         self.mesh_manager.update(solution.marginals)
-
-    def close(self):
-        pass
+        self.update_solve_stats(solution.meta)

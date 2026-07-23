@@ -23,8 +23,11 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
     SharedDiagonal base_pose_noise = get_noise_model_rot_pos(
         config.sigma_base_pose_rot, config.sigma_base_pose_pos);
 
+    SharedDiagonal displacement_constraint_noise = noiseModel::Isotropic::Sigma(
+        static_cast<int>(config.tendon_input.functions.size()), config.sigma_displacement_constraint);
+
     int num_nodes = TendonRobotNumNodes(config.num_discs, config.num_between_nodes);
-    
+
     // Only base and tip are true external wrench nodes for this solver
     model_ = std::make_unique<TendonRobotModel>(
         config.rod_length,
@@ -34,21 +37,30 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
         config.K_inv,
         strain_noise,
         small_wrench_noise_,
+        displacement_constraint_noise,
+        config.axial_stiffness,
         base_pose_mean,
         base_pose_noise,
-        std::vector<int>{0, num_nodes - 1});  
+        std::vector<int>{0, num_nodes - 1});
 }
 
 Solution<TendonRobotModel::ModelMarginals> TendonRobotSolver::solve(
     const VectorXGaussian&                tensions,
     const std::optional<Vector6Gaussian>& tip_wrench,
-    const std::optional<Vector3Gaussian>& tip_position_meas)
+    const std::optional<Vector3Gaussian>& tip_position_meas,
+    const std::optional<VectorXGaussian>& displacement_meas)
 {
     NonlinearFactorGraph priors;
     priors.add(PriorFactor<Vector>(
         model_->get_tensions_key(),
         tensions.mean,
         noiseModel::Gaussian::Covariance(tensions.cov)));
+
+    if (displacement_meas)
+        priors.add(PriorFactor<Vector>(
+            model_->get_displacements_key(),
+            displacement_meas->mean,
+            noiseModel::Gaussian::Covariance(displacement_meas->cov)));
 
     int num_nodes = model_->get_num_nodes();
 

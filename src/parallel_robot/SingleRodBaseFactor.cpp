@@ -19,15 +19,11 @@ Vector SingleRodBaseFactor::evaluateError(
     OptionalMatrixType H1,
     OptionalMatrixType H2) const 
 {
-    // xi = twist of pose relative to the fixed mount pose_, in frame pose_.
-    // localCoordinates gives this directly with its correctly chain-ruled
-    // derivative -- between()+Logmap() computes the same thing, but
-    // between()'s own derivative w.r.t. its second argument (pose here) is
-    // always the identity matrix, so the explicit multiply the old code did
-    // (d_xi_d_delta * d_delta_d_pose) was pure wasted work.
+    // Twist of pose relative to the fixed mount pose
     Matrix6 d_xi_d_pose;
     Vector6 xi = pose_.localCoordinates(pose, std::nullopt, d_xi_d_pose);
 
+    // Stress in the rod's body frame 
     Matrix6 d_stress_body_d_stress, d_stress_body_d_pose;
     Vector6 stress_body = spatial_to_body_wrench(stress, pose, d_stress_body_d_stress, d_stress_body_d_pose);
 
