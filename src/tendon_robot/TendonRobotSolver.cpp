@@ -6,6 +6,7 @@
 #include "utils/MiscInline.h"
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/slam/PoseTranslationPrior.h>
+#include <optional>
 
 using namespace gtsam;
 
@@ -45,16 +46,17 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
 }
 
 Solution<TendonRobotModel::ModelMarginals> TendonRobotSolver::solve(
-    const VectorXGaussian&                tensions,
+    const std::optional<VectorXGaussian>& tensions,
     const std::optional<Vector6Gaussian>& tip_wrench,
     const std::optional<Vector3Gaussian>& tip_position_meas,
     const std::optional<VectorXGaussian>& displacement_meas)
 {
     NonlinearFactorGraph priors;
-    priors.add(PriorFactor<Vector>(
-        model_->get_tensions_key(),
-        tensions.mean,
-        noiseModel::Gaussian::Covariance(tensions.cov)));
+    if (tensions)
+        priors.add(PriorFactor<Vector>(
+            model_->get_tensions_key(),
+            tensions->mean,
+            noiseModel::Gaussian::Covariance(tensions->cov)));
 
     if (displacement_meas)
         priors.add(PriorFactor<Vector>(

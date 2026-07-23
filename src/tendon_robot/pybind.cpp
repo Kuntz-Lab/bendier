@@ -73,7 +73,7 @@ void bind_tendon_robot(py::module& m) {
     py::class_<TendonRobotSolver>(m, "TendonRobotSolver")
         .def(py::init<const TendonRobotSolverConfig&>())
         .def("solve", &TendonRobotSolver::solve,
-             py::arg("tensions"),
+             py::arg("tensions")           = py::none(),
              py::arg("tip_wrench")         = py::none(),
              py::arg("tip_position_meas")  = py::none(),
              py::arg("displacement_meas")  = py::none(),

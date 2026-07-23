@@ -67,7 +67,7 @@ public:
     TendonRobotSolver(const TendonRobotSolverConfig& config);
 
     Solution<TendonRobotModel::ModelMarginals> solve(
-        const VectorXGaussian&                tensions,
+        const std::optional<VectorXGaussian>& tensions           = std::nullopt,
         const std::optional<Vector6Gaussian>& tip_wrench         = std::nullopt,
         const std::optional<Vector3Gaussian>& tip_position_meas  = std::nullopt,
         const std::optional<VectorXGaussian>& displacement_meas  = std::nullopt);

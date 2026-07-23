@@ -1,87 +1,41 @@
-# TODO: review this file
 import threading
 
 import numpy as np
 import viser
+import viser.uplot as uplot
 
 import bendier
 from bendier.visualization import TendonRobotPlotter
+from bendier.visualization.tendon_robot_plotter import TENDON_COLORS as _PLOTTER_TENDON_COLORS
 
-# Running this file directly (`python app.py`) puts its own directory first
-# on sys.path automatically, so config.py -- right next to this file -- is
-# importable with no manual path setup.
 from config import get_config, get_dexterous_tendon_input
 
 
-# Matches SolverBaseConfig's C++ default -- made explicit here (rather than
-# left implicit) so solve_and_update() can compare solution.meta.iterations
-# against it to detect non-convergence: the optimizer only ever reaches this
-# cap by being cut off before satisfying its own stopping criteria, which for
-# a well-posed command it reaches in a handful of iterations. Hitting the cap
-# means the commanded displacement combination is (near-)ill-posed, not that
-# it just needs a bigger iteration budget -- see get_app_config()'s docstring.
-SOLVER_MAX_ITERATIONS = 100
-
-
 def get_app_config(**overrides):
-    # The app uses a different (more dexterous) tendon routing than the
-    # batch sims/tests -- see get_dexterous_tendon_input()'s docstring.
-    # Everything else (rod length, discs, K_inv, sigma_*) stays the same.
     if "base" not in overrides:
         base = bendier.SolverBaseConfig()
-        base.max_iterations = SOLVER_MAX_ITERATIONS
+        base.linear_solver_type = "MULTIFRONTAL_CHOLESKY"
         overrides["base"] = base
+        overrides["tendon_stiffness"] = 1e3
     return get_config(tendon_input=get_dexterous_tendon_input(), **overrides)
 
-# Displacement (cable payout at the base actuator) is the physically
-# realizable command for a real tendon robot -- tension isn't directly
-# commandable, it's inferred. Bounds swept empirically across the old
-# [0, 10] N tension range for this robot's routing.
-DISPLACEMENT_BOUNDS = [
-    [-0.03, 0.08],
-    [-0.03, 0.08],
-    [-0.03, 0.08],
-    [-0.03, 0.08],
-]
-
-DISPLACEMENT_STEP = 0.0005
+TENDON_COLORS = tuple("#%02x%02x%02x" % c for c in _PLOTTER_TENDON_COLORS)
+_GAUSSIAN_PLOT_SCALES = {"x": uplot.Scale(time=False)}
+_GAUSSIAN_PLOT_AXES = (uplot.Axis(), uplot.Axis(show=False))
+_GAUSSIAN_PLOT_LEGEND = uplot.Legend(show=False)
 
 FORCE_MIN, FORCE_MAX, FORCE_STEP = -0.5, 0.5, 0.01
+SIGMA_MOMENT_PRIOR = 0.001
 
-# Moments aren't exposed as sliders -- pinned to zero with a small fixed
-# sigma so they stay negligible without cluttering the GUI.
-MOMENT_SIGMA_FIXED = 0.001
+TENSIONS_PRIOR = bendier.VectorXGaussian(
+    mean=np.full(5, 2.0),
+    cov=np.diag(np.full(5, 1.0 ** 2)))
 
-# Sigma sliders: how tightly each prior pins the solve to its mean. Small
-# sigma is near-deterministic (the classic forward-mechanics case); larger
-# sigma lets the estimate drift away from the slider value in response to
-# other factors in the graph -- which is the actual Bayesian behavior on
-# display, not just a cosmetic knob.
 DISPLACEMENT_SIGMA_MIN, DISPLACEMENT_SIGMA_MAX, DISPLACEMENT_SIGMA_STEP = 0.0001, 0.01, 0.0001
 DISPLACEMENT_SIGMA_INITIAL = 0.0005
 FORCE_SIGMA_MIN, FORCE_SIGMA_MAX, FORCE_SIGMA_STEP = 0.0001, 0.2, 0.0001
 FORCE_SIGMA_INITIAL = 0.001
-
-# Tension is no longer commanded -- it floats free, inferred from the
-# displacement-constraint physics and wrench balance. This fixed, broad
-# sigma keeps that prior uninformative without leaving it fully flat (which
-# can make the linear solve ill-conditioned).
-TENSION_FREE_SIGMA = 20.0
-
-# Damped least-squares step for the IK gizmo. Displacement-space is much
-# smaller-scale (and, empirically, closer to singular near the straight
-# rest state -- observed singular values [17, 13, 0.003] there) than the
-# tension-space Jacobian test_tip_force.py's 1e-2 damping was tuned for, so
-# this needs to be substantially larger to keep the near-singular direction
-# from producing a huge, bound-blowing step.
 IK_DAMPING = 0.5
-
-# Null-space slider is a *relative* control -- see _null_space_step. Its
-# absolute position has no fixed physical meaning (the null direction itself
-# shifts as displacements change), only drags away from wherever it last was.
-# Scaled to displacement's much smaller range (~0.11 m total, vs. the old
-# tension range of 10 N) -- the old (-3, 3) bounds were tuned for tension
-# and would blow through the entire displacement range in a single drag.
 NULL_SPACE_MIN, NULL_SPACE_MAX, NULL_SPACE_STEP = -0.02, 0.02, 0.0005
 
 
@@ -92,39 +46,14 @@ def damped_gauss_newton_step(J, error, damping):
     return np.linalg.solve(A, b)
 
 
-# Floor (N) enforced by clip_step_for_tension_nonneg -- deliberately a small
-# *negative* number, not zero or a positive margin. The resting, unloaded
-# state has every tension already at ~0, so comparing against a floor at or
-# above zero would treat literally the first step away from rest as a full
-# violation and freeze every slider permanently at its starting value.
-# Kept close to zero -- a looser floor tolerates each individual incremental
-# drag step (e.g. a continuous null-space or slider drag fires many small
-# steps), but those per-step violations compound: confirmed empirically that
-# -0.2 let a 10-step drag walk tension down to -0.16 cumulatively, well past
-# what "close to zero" should mean, since each individual step looked small
-# enough to pass on its own.
-TENSION_SAFETY_FLOOR = -0.02
+# Bounds the position-hold loop (see _solve_holding_position). Each round is
+# one more solve, so this is a real cost per tick, but worth spending
+# several rounds to actually converge rather than giving up after one.
+POSITION_HOLD_MAX_ROUNDS = 8
 
-
-def clip_step_for_tension_nonneg(delta, tension_current, J_tension_displacement, floor=TENSION_SAFETY_FLOOR):
-    """Scale a proposed displacement delta down (uniformly, preserving
-    direction) so that, per the current linearized J_tension_displacement
-    sensitivity (d tension / d displacement), no tension is predicted to
-    drop below `floor`. This is the same "fraction to the boundary" idea an
-    interior-point method uses to limit a step -- an approximation (the true
-    relationship is nonlinear, and empirically quite strongly so in some
-    regions of this system), not a hard guarantee. It's the only line of
-    defense against negative tension: the solver itself has no constraint on
-    tension sign. Returns delta unchanged if no violation is predicted.
-    """
-    predicted_delta = J_tension_displacement @ delta
-    alpha = 1.0
-    for t, dt in zip(tension_current, predicted_delta):
-        if dt < 0:
-            # Largest alpha in [0, 1] with t + alpha*dt >= floor.
-            alpha_i = (floor - t) / dt
-            alpha = min(alpha, alpha_i)
-    return max(alpha, 0.0) * delta
+# Stop condition for the position-hold loop. 0.1 mm -- tight enough to feel
+# genuinely "held," loose enough not to chase floating-point noise forever.
+POSITION_HOLD_TOLERANCE = 1e-4
 
 
 def null_space_vector(J, prev_vec=None):
@@ -145,27 +74,27 @@ def null_space_vector(J, prev_vec=None):
     return null_vec
 
 
-def null_space_tension_correction(null_vec, J_tension, predicted_tension, floor=TENSION_SAFETY_FLOOR):
-    """Classical null-space redundancy resolution: given a primary task step
-    has already been taken (predicted_tension reflects its effect on
-    tension), return the additional alpha*null_vec correction that fixes the
-    single worst predicted tension violation, if any. Moving along null_vec
-    is exactly the direction that leaves the primary task's output unchanged
-    to first order, so this is a "free" secondary objective -- it never
-    fights the primary task the way a competing penalty term would.
-
-    Only corrects the worst violation (not a general multi-constraint
-    solve): with one redundant DOF, a single scalar generally can't satisfy
-    several simultaneous violations that need opposite-signed corrections
-    anyway, so there is no real accuracy given up by keeping this simple.
+def gaussian_curves_for_uplot(means, stds, n_points=150, span_sigmas=4.0):
+    """Shared x-axis plus one Gaussian curve per series, for viser's
+    add_uplot. Deliberately unnormalized (peak height 1, not a true density
+    integrating to 1): these tendons can have wildly different uncertainty
+    scales (e.g. a tightly-commanded displacement next to a loosely-inferred
+    tension), and a true density would render the tight one as an invisible
+    spike while flattening the loose one to near-zero on a shared y-axis --
+    peak-height-1 curves keep mean/relative-width comparable at a glance
+    regardless of scale. X-axis dynamically spans every series' mean +/-
+    span_sigmas*std so all curves stay visible every update, not just
+    whichever range happened to be right for one particular tick.
     """
-    sensitivity = J_tension @ null_vec
-    worst = np.argmin(predicted_tension - floor)
-    t, s = predicted_tension[worst], sensitivity[worst]
-    if t >= floor or s == 0:
-        return np.zeros_like(null_vec)
-    alpha = (floor - t) / s
-    return alpha * null_vec
+    means = np.asarray(means, dtype=float)
+    stds = np.maximum(np.asarray(stds, dtype=float), 1e-9)
+    lo = np.min(means - span_sigmas * stds)
+    hi = np.max(means + span_sigmas * stds)
+    if hi <= lo:
+        hi = lo + 1e-6
+    x = np.linspace(lo, hi, n_points)
+    ys = [np.exp(-0.5 * ((x - m) / s) ** 2) for m, s in zip(means, stds)]
+    return x, ys
 
 
 class TendonRobotApp:
@@ -201,7 +130,20 @@ class TendonRobotApp:
         # treating its absolute position as meaningful.
         self._null_space_prev_value = 0.0
 
+        # Target for "Hold Position" mode -- see _solve_holding_position and
+        # _ik_step. Set whenever the IK gizmo is dragged (regardless of
+        # whether hold mode is currently on, so turning it on later picks up
+        # from wherever the tip last was); only *acted* on while the
+        # checkbox is checked.
+        self._held_position = None
+
         self.num_tendons = len(get_dexterous_tendon_input().params)
+
+        # Displacement has no GUI slider anymore (see the read-only Gaussian
+        # plot in _build_gui) -- this is the actual state IK/null-space
+        # steps read and write (via _apply_displacement), mirroring what
+        # slider.value used to store.
+        self._current_displacement = np.zeros(self.num_tendons)
 
         self._build_gui()
         self.solve_and_update()
@@ -210,13 +152,27 @@ class TendonRobotApp:
         server = self.server
 
         with server.gui.add_folder("Tendon Displacements"):
-            self.displacement_sliders = [
-                server.gui.add_slider(
-                    f"tendon {i}", min=DISPLACEMENT_BOUNDS[i][0], max=DISPLACEMENT_BOUNDS[i][1],
-                    step=DISPLACEMENT_STEP, initial_value=0.0)
-                for i in range(self.num_tendons)
-            ]
-            reset_displacements = server.gui.add_button("Reset displacements")
+            # Displacement is no longer a direct user input -- it's entirely
+            # determined by the solve (tension safety enforced by
+            # TendonTensionBoundFactor inside the graph itself, position
+            # tracking layered on top by _solve_holding_position).
+            # Mean/uncertainty per tendon shown as small Gaussian curves
+            # (see gaussian_curves_for_uplot)
+            # instead of a numeric readout. add_uplot rather than
+            # add_plotly: viser's own docs flag Plotly as too slow for
+            # frequent updates, and this refreshes on every solve.
+            self.displacement_plot = server.gui.add_uplot(
+                data=tuple([np.zeros(2)] + [np.zeros(2)] * self.num_tendons),
+                series=tuple([{}] + [
+                    {"label": f"tendon {i}", "stroke": TENDON_COLORS[i], "width": 2}
+                    for i in range(self.num_tendons)
+                ]),
+                scales=_GAUSSIAN_PLOT_SCALES,
+                axes=_GAUSSIAN_PLOT_AXES,
+                legend=_GAUSSIAN_PLOT_LEGEND,
+                title="displacement (m)",
+                height=140,
+            )
             # 4 tendons controlling a 3D tip position is overactuated by one
             # DOF -- dragging this shifts displacements along that redundant
             # direction (see null_space_vector) without moving the tip, e.g.
@@ -231,6 +187,23 @@ class TendonRobotApp:
                 hint="Redundant DOF: drag to shift tendon displacements without moving the tip")
             reset_null_space = server.gui.add_button("Center null space")
 
+        with server.gui.add_folder("Tendon Tensions"):
+            # Same treatment as displacement above -- where each tendon
+            # sits relative to zero (a real cable can't push), visually,
+            # at a glance.
+            self.tension_plot = server.gui.add_uplot(
+                data=tuple([np.zeros(2)] + [np.zeros(2)] * self.num_tendons),
+                series=tuple([{}] + [
+                    {"label": f"tendon {i}", "stroke": TENDON_COLORS[i], "width": 2}
+                    for i in range(self.num_tendons)
+                ]),
+                scales=_GAUSSIAN_PLOT_SCALES,
+                axes=_GAUSSIAN_PLOT_AXES,
+                legend=_GAUSSIAN_PLOT_LEGEND,
+                title="tension (N)",
+                height=140,
+            )
+
         with server.gui.add_folder("Tip Force"):
             self.force_sliders = [
                 server.gui.add_slider(
@@ -239,6 +212,12 @@ class TendonRobotApp:
                 for label in ("fx", "fy", "fz")
             ]
             reset_wrench = server.gui.add_button("Reset force")
+
+        with server.gui.add_folder("Position Hold"):
+            self.hold_position_checkbox = server.gui.add_checkbox(
+                "hold position", initial_value=False,
+                hint="Keep the controller correcting displacement to hold the tip in place, "
+                     "even as tip force changes -- otherwise force is free to move the tip.")
 
         with server.gui.add_folder("Uncertainty (sigma)"):
             self.displacement_sigma_slider = server.gui.add_slider(
@@ -251,20 +230,12 @@ class TendonRobotApp:
         with server.gui.add_folder("Solution"):
             self.tip_position_readout = server.gui.add_text(
                 "tip position", initial_value="", disabled=True)
-            # Tension is inferred, not commanded, when driving from
-            # displacement -- a real cable can't push, but nothing in this
-            # Gaussian graph enforces tension >= 0, so a commanded
-            # displacement combination that isn't actually achievable can
-            # produce a negative inferred tension. Surface it instead of
-            # silently accepting an unphysical solution.
-            self.tension_readout = server.gui.add_text(
-                "tensions (inferred)", initial_value="", disabled=True)
             self.status_readout = server.gui.add_text(
                 "status", initial_value="ok", disabled=True)
             reset_solver = server.gui.add_button("Reset solver")
 
         sigma_sliders = [self.displacement_sigma_slider, self.force_sigma_slider]
-        for slider in self.displacement_sliders + self.force_sliders + sigma_sliders:
+        for slider in self.force_sliders + sigma_sliders:
             slider.on_update(lambda _: self.solve_and_update())
 
         # Draggable IK target -- rotation disabled since 4 tendons only ever
@@ -283,9 +254,15 @@ class TendonRobotApp:
                 self._gizmo_dragging = False
                 self._reposition_ik_gizmo()
 
-        @reset_displacements.on_click
+        @self.hold_position_checkbox.on_update
         def _(_):
-            self._set_sliders((s, 0.0) for s in self.displacement_sliders)
+            if self.hold_position_checkbox.value and self._held_position is None \
+                    and self._last_solution is not None:
+                # Nothing dragged yet -- lock onto wherever the tip
+                # currently is rather than snapping somewhere unexpected.
+                self._held_position = \
+                    self._last_solution.marginals.rod.states[-1].pose.mean[:3, 3].copy()
+            self.solve_and_update()
 
         self.null_space_slider.on_update(lambda _: self._null_space_step())
 
@@ -310,22 +287,20 @@ class TendonRobotApp:
             self._reset_solver()
 
     def _set_sliders(self, slider_value_pairs):
-        # Sets several sliders as one atomic update: suppresses the
-        # per-slider solve_and_update() cascade that setting .value from
-        # Python would otherwise trigger (each change fires its on_update
-        # callback synchronously), so only one solve happens against the
-        # fully-updated state. Without this, intermediate partially-updated
-        # states get solved individually on the *same* solver instance, and
-        # the optimizer warm-starts each next solve off whatever the
-        # previous (possibly pathological) intermediate one converged to --
-        # confirmed this can leave the solver stuck in a bad local minimum
-        # even once every slider has reached its correct final value.
         self._suppress_slider_solve = True
         try:
             for slider, value in slider_value_pairs:
                 slider.value = value
         finally:
             self._suppress_slider_solve = False
+        self.solve_and_update()
+
+    def _apply_displacement(self, displacement):
+        # Displacement has no GUI slider to write to anymore (see the
+        # Tendon Displacements plot) -- this updates the internal state
+        # IK/null-space steps mutate, then solves. Mirrors what
+        # _set_sliders used to do for the old displacement sliders.
+        self._current_displacement = np.asarray(displacement, dtype=float)
         self.solve_and_update()
 
     def _reset_solver(self):
@@ -338,69 +313,54 @@ class TendonRobotApp:
             self.plotter.reset_solve_stats()
             self._null_space_prev_vec = None
             self._null_space_prev_value = 0.0
+            self._held_position = None
+            self._current_displacement = np.zeros(self.num_tendons)
             self._set_sliders(
-                [(s, 0.0) for s in self.displacement_sliders + self.force_sliders]
+                [(s, 0.0) for s in self.force_sliders]
                 + [(self.null_space_slider, 0.0)]
                 + [(self.displacement_sigma_slider, DISPLACEMENT_SIGMA_INITIAL)]
                 + [(self.force_sigma_slider, FORCE_SIGMA_INITIAL)])
+
+    def _solve_holding_position(self, tip_wrench, displacement_cov):
+        displacement_meas = bendier.VectorXGaussian(self._current_displacement, displacement_cov)
+        solution = self.solver.solve(TENSIONS_PRIOR, tip_wrench, None, displacement_meas)
+
+        if self.hold_position_checkbox.value and self._held_position is not None:
+            for _ in range(POSITION_HOLD_MAX_ROUNDS):
+                pose_mean = solution.marginals.rod.states[-1].pose.mean
+                R, p_meas = pose_mean[:3, :3], pose_mean[:3, 3]
+                p_error = R.T @ (self._held_position - p_meas)
+
+                if np.linalg.norm(p_error) < POSITION_HOLD_TOLERANCE:
+                    break
+
+                J_position = solution.marginals.J_pose_displacements[3:]
+                dq = damped_gauss_newton_step(J_position, p_error, IK_DAMPING)
+                self._current_displacement = self._current_displacement + dq
+
+                displacement_meas = bendier.VectorXGaussian(self._current_displacement, displacement_cov)
+                solution = self.solver.solve(TENSIONS_PRIOR, tip_wrench, None, displacement_meas)
+
+        return solution
 
     def solve_and_update(self):
         with self._solve_lock:
             if self._suppress_slider_solve:
                 return
 
-            raw_displacement = np.array([s.value for s in self.displacement_sliders])
-
-            # Every path that changes displacement (IK step, null-space step,
-            # or a raw slider drag) funnels through here, so clipping here
-            # protects all three uniformly: predict the effect of this
-            # change on tension using the current linearized sensitivity,
-            # and scale it back if it would cross into negative tension --
-            # this is the only guard against it, the solver itself places no
-            # constraint on tension sign.
-            if self._last_solution is not None:
-                current_displacement = self._last_solution.marginals.displacements.mean
-                current_tension = self._last_solution.marginals.tensions.mean
-                J_tension_displacement = self._last_solution.marginals.J_tension_displacements
-
-                delta = raw_displacement - current_displacement
-                clipped_delta = clip_step_for_tension_nonneg(
-                    delta, current_tension, J_tension_displacement)
-                displacement_mean = current_displacement + clipped_delta
-
-                if not np.allclose(displacement_mean, raw_displacement, atol=1e-9):
-                    # Snap the sliders back to what's actually being
-                    # commanded, so the display never shows a value that
-                    # was silently overridden.
-                    self._suppress_slider_solve = True
-                    try:
-                        for slider, value in zip(self.displacement_sliders, displacement_mean):
-                            slider.value = value
-                    finally:
-                        self._suppress_slider_solve = False
-            else:
-                displacement_mean = raw_displacement
-
             force_mean = np.array([s.value for s in self.force_sliders])
             tip_wrench_mean = np.concatenate([np.zeros(3), force_mean])
 
             displacement_cov = (self.displacement_sigma_slider.value ** 2) * np.eye(self.num_tendons)
             wrench_sigma = np.concatenate([
-                np.full(3, MOMENT_SIGMA_FIXED),
+                np.full(3, SIGMA_MOMENT_PRIOR),
                 np.full(3, self.force_sigma_slider.value),
             ])
             wrench_cov = np.diag(wrench_sigma ** 2)
-
-            # Tension is no longer commanded -- broad/uninformative prior
-            # lets it float, inferred from the displacement + wrench-balance
-            # physics (see TENSION_FREE_SIGMA).
-            tensions = bendier.VectorXGaussian(
-                np.zeros(self.num_tendons), (TENSION_FREE_SIGMA ** 2) * np.eye(self.num_tendons))
             tip_wrench = bendier.Vector6Gaussian(tip_wrench_mean, wrench_cov)
-            displacement_meas = bendier.VectorXGaussian(displacement_mean, displacement_cov)
 
             try:
-                solution = self.solver.solve(tensions, tip_wrench, None, displacement_meas)
+                solution = self._solve_holding_position(tip_wrench, displacement_cov)
             except Exception as e:
                 print(f"[tendon_robot/app] solve() failed, resetting solver: {e}")
                 self.solver = bendier.TendonRobotSolver(get_app_config())
@@ -418,29 +378,21 @@ class TendonRobotApp:
             self.tip_position_readout.value = (
                 f"[{tip_position[0]:.4f}, {tip_position[1]:.4f}, {tip_position[2]:.4f}] m")
 
-            # The optimizer only reaches SOLVER_MAX_ITERATIONS by being cut
-            # off before satisfying its own stopping criteria -- a well-posed
-            # command converges in far fewer. Hitting the cap means the
-            # result below is a stale, not-actually-converged snapshot, not
-            # a real answer -- flag it instead of presenting it as "ok".
-            if solution.meta.iterations >= SOLVER_MAX_ITERATIONS:
+            if solution.meta.iterations >= 100:
                 self.status_readout.value = (
                     "did not converge -- commanded displacement is (near-)ill-posed")
             else:
                 self.status_readout.value = "ok"
 
-            # Nothing in this Gaussian graph enforces tension >= 0 -- a real
-            # cable can't push, so flag it if a commanded displacement
-            # combination implies an unphysical (negative) tension instead
-            # of silently accepting the least-squares result. Small negative
-            # tolerance absorbs solver/floating-point noise near true zero
-            # (e.g. the straight, unloaded rest state) without false-flagging.
-            tensions_inferred = solution.marginals.tensions.mean
-            tension_str = ", ".join(f"{t:.3f}" for t in tensions_inferred)
-            if np.any(tensions_inferred < -1e-3):
-                self.tension_readout.value = f"[{tension_str}] N -- NEGATIVE (unphysical)"
-            else:
-                self.tension_readout.value = f"[{tension_str}] N"
+            disp_mean = solution.marginals.displacements.mean
+            disp_std = np.sqrt(np.maximum(np.diag(solution.marginals.displacements.cov), 0.0))
+            x, ys = gaussian_curves_for_uplot(disp_mean, disp_std)
+            self.displacement_plot.data = tuple([x, *ys])
+
+            tension_mean = solution.marginals.tensions.mean
+            tension_std = np.sqrt(np.maximum(np.diag(solution.marginals.tensions.cov), 0.0))
+            x2, ys2 = gaussian_curves_for_uplot(tension_mean, tension_std)
+            self.tension_plot.data = tuple([x2, *ys2])
 
             self._last_solution = solution
             if self._ik_gizmo is not None and not self._gizmo_dragging:
@@ -456,42 +408,18 @@ class TendonRobotApp:
             if self._last_solution is None:
                 return
 
+            self._held_position = np.asarray(p_goal, dtype=float).copy()
+
             J_position = self._last_solution.marginals.J_pose_displacements[3:]
-            J_tension = self._last_solution.marginals.J_tension_displacements
-            tension_current = self._last_solution.marginals.tensions.mean
 
             pose_mean = self._last_solution.marginals.rod.states[-1].pose.mean
             R, p_meas = pose_mean[:3, :3], pose_mean[:3, 3]
             p_error = R.T @ (p_goal - p_meas)
 
-            # Primary task: track the tip position target.
-            dq_primary = damped_gauss_newton_step(J_position, p_error, IK_DAMPING)
-
-            # Secondary, "free" correction along the task's own null-space
-            # direction (doesn't disturb tip tracking to first order) to
-            # pull tension back from the floor if the primary step alone
-            # would cross it. Not tied to self._null_space_prev_vec -- this
-            # is a fresh one-shot correction each tick, not an accumulating
-            # drag, so the sign-continuity concern that matters for the
-            # null-space slider doesn't apply here.
-            null_vec = null_space_vector(J_position)
-            predicted_tension = tension_current + J_tension @ dq_primary
-            dq_correction = null_space_tension_correction(null_vec, J_tension, predicted_tension)
-
-            dq = dq_primary + dq_correction
-            displacements = np.clip(
-                np.array([s.value for s in self.displacement_sliders]) + dq,
-                [bound[0] for bound in DISPLACEMENT_BOUNDS], [bound[1] for bound in DISPLACEMENT_BOUNDS])
-
-            self._set_sliders(zip(self.displacement_sliders, displacements))
+            dq = damped_gauss_newton_step(J_position, p_error, IK_DAMPING)
+            self._apply_displacement(self._current_displacement + dq)
 
     def _null_space_step(self):
-        # Relative control: the slider's absolute value has no fixed
-        # physical meaning (the null direction shifts as displacements
-        # change), so each event applies only *how far it moved since last
-        # time*, not its raw position -- lets you drag it back and forth
-        # freely, any number of times, without needing to return to some
-        # "zero".
         if self._suppress_slider_solve:
             return
 
@@ -511,18 +439,8 @@ class TendonRobotApp:
             null_vec = null_space_vector(J_position, self._null_space_prev_vec)
             self._null_space_prev_vec = null_vec
 
-            displacements = np.clip(
-                np.array([s.value for s in self.displacement_sliders]) + delta * null_vec,
-                [bound[0] for bound in DISPLACEMENT_BOUNDS], [bound[1] for bound in DISPLACEMENT_BOUNDS])
+            self._apply_displacement(self._current_displacement + delta * null_vec)
 
-            self._set_sliders(zip(self.displacement_sliders, displacements))
-
-            # The null-space step only holds the tip exactly at first order --
-            # over a long continuous drag the null direction itself rotates
-            # and the tip can creep. Cancel that by pulling back toward
-            # where the tip was right before this tick, reusing the same
-            # IK correction the drag gizmo uses (so it stays locked across
-            # the whole drag, not just for infinitesimal moves).
             self._ik_step(p_target)
 
 
