@@ -9,6 +9,7 @@
 #include "cosserat_rod/CosseratRodModel.h"
 #include "cosserat_rod/CosseratStrainFactor.h"
 #include "cosserat_rod/CosseratStressFactor.h"
+#include "measurement/ActuationForceMeasFactor.h"
 #include "parallel_robot/PlatformWrenchBalanceFactor.h"
 #include "parallel_robot/SingleRodBaseFactor.h"
 #include "rigid_robot/RigidJointFactor.h"
@@ -195,6 +196,16 @@ TEST(SingleRodBaseFactor, jacobians) {
   Values values;
   values.insert(pk, pose_a());
   values.insert(sk, wrench_1());
+
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
+}
+
+TEST(ActuationForceMeasFactor, jacobians) {
+  Key wk = 1;
+  ActuationForceMeasFactor factor(wk, /*f_z_meas=*/1.7, noiseModel::Unit::Create(1));
+
+  Values values;
+  values.insert(wk, wrench_1());
 
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
 }

@@ -83,7 +83,7 @@ if(BENDIER_BUILD_TESTS)
   if(CPPUNITLITE_LIBRARY AND CPPUNITLITE_INCLUDE_DIR)
     enable_testing()
 
-    add_executable(bendier_tests tests/JacobianTests.cpp)
+    add_executable(bendier_tests tests/JacobianTests.cpp tests/RobotJacobianTests.cpp)
 
     target_include_directories(bendier_tests
       PRIVATE
