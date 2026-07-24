@@ -16,8 +16,9 @@ def get_app_config(**overrides):
         base = bendier.SolverBaseConfig()
         base.linear_solver_type = "MULTIFRONTAL_CHOLESKY"
         overrides["base"] = base
-        overrides["tendon_stiffness"] = 1e3
+        overrides["tendon_stiffness"] = 200.0e9 * (np.pi  / 4.0) * (0.0005)**2  # Stainless wire
     return get_config(tendon_input=get_dexterous_tendon_input(), **overrides)
+
 
 TENDON_COLORS = tuple("#%02x%02x%02x" % c for c in _PLOTTER_TENDON_COLORS)
 _GAUSSIAN_PLOT_SCALES = {"x": uplot.Scale(time=False)}
@@ -26,10 +27,8 @@ _GAUSSIAN_PLOT_LEGEND = uplot.Legend(show=False)
 
 FORCE_MIN, FORCE_MAX, FORCE_STEP = -0.5, 0.5, 0.01
 SIGMA_MOMENT_PRIOR = 0.001
-
-TENSIONS_PRIOR = bendier.VectorXGaussian(
-    mean=np.full(5, 2.0),
-    cov=np.diag(np.full(5, 1.0 ** 2)))
+TENSIONS_PRIOR_MEAN = 2.0
+TENSIONS_PRIOR_SIGMA = 1.0
 
 DISPLACEMENT_SIGMA_MIN, DISPLACEMENT_SIGMA_MAX, DISPLACEMENT_SIGMA_STEP = 0.0001, 0.01, 0.0001
 DISPLACEMENT_SIGMA_INITIAL = 0.0005
@@ -139,6 +138,11 @@ class TendonRobotApp:
 
         self.num_tendons = len(get_dexterous_tendon_input().params)
 
+        self.tensions_prior = bendier.VectorXGaussian(
+            mean=np.full(self.num_tendons, TENSIONS_PRIOR_MEAN),
+            cov=np.diag(np.full(self.num_tendons, TENSIONS_PRIOR_SIGMA ** 2))
+        )
+
         # Displacement has no GUI slider anymore (see the read-only Gaussian
         # plot in _build_gui) -- this is the actual state IK/null-space
         # steps read and write (via _apply_displacement), mirroring what
@@ -152,15 +156,6 @@ class TendonRobotApp:
         server = self.server
 
         with server.gui.add_folder("Tendon Displacements"):
-            # Displacement is no longer a direct user input -- it's entirely
-            # determined by the solve (tension safety enforced by
-            # TendonTensionBoundFactor inside the graph itself, position
-            # tracking layered on top by _solve_holding_position).
-            # Mean/uncertainty per tendon shown as small Gaussian curves
-            # (see gaussian_curves_for_uplot)
-            # instead of a numeric readout. add_uplot rather than
-            # add_plotly: viser's own docs flag Plotly as too slow for
-            # frequent updates, and this refreshes on every solve.
             self.displacement_plot = server.gui.add_uplot(
                 data=tuple([np.zeros(2)] + [np.zeros(2)] * self.num_tendons),
                 series=tuple([{}] + [
@@ -173,14 +168,6 @@ class TendonRobotApp:
                 title="displacement (m)",
                 height=140,
             )
-            # 4 tendons controlling a 3D tip position is overactuated by one
-            # DOF -- dragging this shifts displacements along that redundant
-            # direction (see null_space_vector) without moving the tip, e.g.
-            # to trade off internal tension/stiffness. It's a *relative*
-            # control (see _null_space_step): drag it any direction, any
-            # amount, as many times as you like -- its absolute position
-            # doesn't mean anything on its own, only motion away from
-            # wherever it last was.
             self.null_space_slider = server.gui.add_slider(
                 "null space", min=NULL_SPACE_MIN, max=NULL_SPACE_MAX,
                 step=NULL_SPACE_STEP, initial_value=0.0,
@@ -323,7 +310,7 @@ class TendonRobotApp:
 
     def _solve_holding_position(self, tip_wrench, displacement_cov):
         displacement_meas = bendier.VectorXGaussian(self._current_displacement, displacement_cov)
-        solution = self.solver.solve(TENSIONS_PRIOR, tip_wrench, None, displacement_meas)
+        solution = self.solver.solve(self.tensions_prior, tip_wrench, None, displacement_meas)
 
         if self.hold_position_checkbox.value and self._held_position is not None:
             for _ in range(POSITION_HOLD_MAX_ROUNDS):
@@ -339,7 +326,7 @@ class TendonRobotApp:
                 self._current_displacement = self._current_displacement + dq
 
                 displacement_meas = bendier.VectorXGaussian(self._current_displacement, displacement_cov)
-                solution = self.solver.solve(TENSIONS_PRIOR, tip_wrench, None, displacement_meas)
+                solution = self.solver.solve(self.tensions_prior, tip_wrench, None, displacement_meas)
 
         return solution
 
