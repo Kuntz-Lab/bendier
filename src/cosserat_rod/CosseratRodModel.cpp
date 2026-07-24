@@ -1,11 +1,10 @@
 #include "CosseratRodModel.h"
 #include "utils/ModelConcept.h"
 
-#include "CosseratStrainFactor.h"
-#include "CosseratStressFactor.h"
-#include "BoundaryStressFactor.h"
+#include "CosseratBoundaryEquilibriumFactor.h"
+#include "CosseratConstitutiveFactor.h"
+#include "CosseratEquilibriumFactor.h"
 #include <gtsam/base/Vector.h>
-#include <gtsam/nonlinear/PriorFactor.h>
 #include <stdexcept>
 
 using namespace gtsam;
@@ -16,8 +15,8 @@ CosseratRodModel::CosseratRodModel(const CosseratRodModelConfig& config)
 :
     id_(next_id_++),
     num_nodes_(config.num_nodes),
-    strain_noise_(config.strain_noise),
-    stress_noise_(config.stress_noise),
+    constitutive_noise_(config.constitutive_noise),
+    equilibrium_noise_(config.equilibrium_noise),
     num_magnus_terms_(config.num_magnus_terms),
     rod_length_(config.rod_length),
     nominal_strain_(config.nominal_strain)
@@ -97,9 +96,10 @@ NonlinearFactorGraph CosseratRodModel::build_graph() const
 
     std::vector<double> ds(num_nodes_ - 1, rod_length_ / (num_nodes_ - 1));
 
-    // Cosserat kinematics and mechanics factors
+    // Constitutive factors: linear pose/stress elasticity between every
+    // pair of adjacent nodes.
     for (int i = 0; i + 1 < num_nodes_; ++i) {
-        graph.add(CosseratStrainFactor(
+        graph.add(CosseratConstitutiveFactor(
             pose_keys_[i],
             pose_keys_[i + 1],
             stress_keys_[i],
@@ -107,50 +107,29 @@ NonlinearFactorGraph CosseratRodModel::build_graph() const
             ds[i],
             nominal_strain_,
             K_inv_[i],
-            strain_noise_,
+            constitutive_noise_,
             num_magnus_terms_));
-
-        // The tip always uses the no wrench factor, since the tip's own wrench would be handled by BoundaryStressFactor below
-        bool is_tip_edge = (i + 1 == num_nodes_ - 1);
-        if (is_tip_edge || !wrench_keys_[i + 1]) {
-            graph.add(CosseratStressFactor(
-                pose_keys_[i],
-                pose_keys_[i + 1],
-                stress_keys_[i],
-                stress_keys_[i + 1],
-                stress_noise_));
-        } else {
-            graph.add(CosseratStressFactor(
-                pose_keys_[i],
-                pose_keys_[i + 1],
-                stress_keys_[i],
-                stress_keys_[i + 1],
-                *wrench_keys_[i + 1],
-                stress_noise_));
-        }
     }
 
-    // If there's a tip wrench, then the stress at the tip is determined by that wrench
-    // If there's no tip wrench, then the stress at the tip is pinned to zero (free end).
-    if (wrench_keys_.back()) {
-        graph.add(BoundaryStressFactor(
-            stress_keys_.back(),
-            *wrench_keys_.back(),
-            stress_noise_,
-            /* is_base = */ false));
-    } else {
-        graph.add(PriorFactor<Vector6>(stress_keys_.back(), Vector6::Zero(), stress_noise_));
-    }
+    // Equilibrium factors: wrench balance between neighboring nodes.
+    for (int i = 0; i + 1 < num_nodes_; ++i) {
+        bool is_tip_edge = (i + 2 == num_nodes_);
+        std::optional<Key> wrench_here = is_tip_edge ? std::optional<Key>{} : wrench_keys_[i + 1];
+        graph.add(CosseratEquilibriumFactor(
+            pose_keys_[i],
+            pose_keys_[i + 1],
+            stress_keys_[i],
+            stress_keys_[i + 1],
+            wrench_here,
+            equilibrium_noise_));
 
-    // Same deal for the base as above, but with the base wrench and stress
-    if (wrench_keys_.front()) {
-        graph.add(BoundaryStressFactor(
-            stress_keys_.front(),
-            *wrench_keys_.front(),
-            stress_noise_,
-            /* is_base = */ true));
-    } else {
-        graph.add(PriorFactor<Vector6>(stress_keys_.front(), Vector6::Zero(), stress_noise_));
+        if (i == 0)
+            graph.add(CosseratBoundaryEquilibriumFactor(
+                stress_keys_.front(), wrench_keys_.front(), equilibrium_noise_, /* is_base = */ true));
+
+        if (is_tip_edge)
+            graph.add(CosseratBoundaryEquilibriumFactor(
+                stress_keys_.back(), wrench_keys_.back(), equilibrium_noise_, /* is_base = */ false));
     }
 
     return graph;

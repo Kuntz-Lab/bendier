@@ -27,15 +27,33 @@ _GAUSSIAN_PLOT_LEGEND = uplot.Legend(show=False)
 
 FORCE_MIN, FORCE_MAX, FORCE_STEP = -0.5, 0.5, 0.01
 SIGMA_MOMENT_PRIOR = 0.001
-TENSIONS_PRIOR_MEAN = 2.0
-TENSIONS_PRIOR_SIGMA = 1.0
-
 DISPLACEMENT_SIGMA_MIN, DISPLACEMENT_SIGMA_MAX, DISPLACEMENT_SIGMA_STEP = 0.0001, 0.01, 0.0001
 DISPLACEMENT_SIGMA_INITIAL = 0.0005
 FORCE_SIGMA_MIN, FORCE_SIGMA_MAX, FORCE_SIGMA_STEP = 0.0001, 0.2, 0.0001
 FORCE_SIGMA_INITIAL = 0.001
 IK_DAMPING = 0.5
-NULL_SPACE_MIN, NULL_SPACE_MAX, NULL_SPACE_STEP = -0.02, 0.02, 0.0005
+# IK target is also a fixed-anchor drag handle now (see the null-space
+# comment below for why -- same reasoning, plus it used to sit right on
+# top of the tip marker, which looked cluttered). Unlike null space this
+# keeps its plane-drag squares (full 3-DOF dragging), just smaller and
+# moved off to the side. Dragging it away from IK_GIZMO_ANCHOR is a
+# *relative* nudge to the tracked tip target, composed the same
+# tick-by-tick delta way as the null-space handle; releasing snaps it back
+# without undoing whatever target motion was already applied.
+IK_GIZMO_ANCHOR = (-0.08, 0.0, 0.0)
+IK_GIZMO_RANGE = 0.03
+IK_GIZMO_SCALE = 0.03
+# Null-space control is a small single-axis drag handle in the 3D scene
+# (see _build_gui), not a GUI slider -- a slider has no way to tell Python
+# when the user lets go (viser only sends value-changed events, confirmed
+# by reading its frontend Slider component), so it can't self-center on
+# release. A restricted transform_controls gizmo (single active axis, no
+# rotation rings, no plane-drag squares) gives a real start/update/end
+# phase callback -- the same mechanism the IK gizmo already relies on --
+# for genuine drag-release detection, with no viser patching needed.
+NULL_SPACE_MIN, NULL_SPACE_MAX = -0.02, 0.02
+NULL_SPACE_GIZMO_ANCHOR = (0.08, 0.0, 0.0)
+NULL_SPACE_GIZMO_SCALE = 0.025
 
 
 def damped_gauss_newton_step(J, error, damping):
@@ -113,21 +131,23 @@ class TendonRobotApp:
         # Lock we're already holding.
         self._solve_lock = threading.RLock()
 
-        # IK gizmo state -- see _ik_step/_reposition_ik_gizmo. _last_solution
-        # is the Jacobian source for the next IK tick (always exactly
-        # consistent with the current slider values, since nothing mutates
-        # them between one solve_and_update() and the next except _ik_step
-        # itself, which always re-solves immediately under the same lock).
+        # _last_solution is the Jacobian source for the next IK tick (always
+        # exactly consistent with the current slider values, since nothing
+        # mutates them between one solve_and_update() and the next except
+        # _ik_step itself, which always re-solves immediately under the
+        # same lock).
         self._last_solution = None
-        self._gizmo_dragging = False
         self._suppress_slider_solve = False
-        self._ik_gizmo = None
         # Sign-continuity anchor for null_space_vector -- see its docstring.
         self._null_space_prev_vec = None
-        # Last-seen value of the null-space slider, so on_update can compute
-        # how far it moved *this* event (see _null_space_step) rather than
-        # treating its absolute position as meaningful.
+        # Last-seen offset (from NULL_SPACE_GIZMO_ANCHOR/IK_GIZMO_ANCHOR) of
+        # each drag handle, so on_update can compute how far it moved *this*
+        # event (see _null_space_step/the IK gizmo's on_update) rather than
+        # treating its absolute position as meaningful -- both handles snap
+        # back to their anchor on release, so only the delta since the last
+        # tick is ever meaningful, never the absolute position.
         self._null_space_prev_value = 0.0
+        self._ik_offset_prev = np.zeros(3)
 
         # Target for "Hold Position" mode -- see _solve_holding_position and
         # _ik_step. Set whenever the IK gizmo is dragged (regardless of
@@ -137,11 +157,6 @@ class TendonRobotApp:
         self._held_position = None
 
         self.num_tendons = len(get_dexterous_tendon_input().params)
-
-        self.tensions_prior = bendier.VectorXGaussian(
-            mean=np.full(self.num_tendons, TENSIONS_PRIOR_MEAN),
-            cov=np.diag(np.full(self.num_tendons, TENSIONS_PRIOR_SIGMA ** 2))
-        )
 
         # Displacement has no GUI slider anymore (see the read-only Gaussian
         # plot in _build_gui) -- this is the actual state IK/null-space
@@ -168,11 +183,10 @@ class TendonRobotApp:
                 title="displacement (m)",
                 height=140,
             )
-            self.null_space_slider = server.gui.add_slider(
-                "null space", min=NULL_SPACE_MIN, max=NULL_SPACE_MAX,
-                step=NULL_SPACE_STEP, initial_value=0.0,
-                hint="Redundant DOF: drag to shift tendon displacements without moving the tip")
-            reset_null_space = server.gui.add_button("Center null space")
+            server.gui.add_markdown(
+                "Null space: drag the small arrow handle in the 3D view "
+                "(near the base) to shift tendon displacements without "
+                "moving the tip -- it snaps back to center when you let go.")
 
         with server.gui.add_folder("Tendon Tensions"):
             # Same treatment as displacement above -- where each tendon
@@ -228,18 +242,35 @@ class TendonRobotApp:
         # Draggable IK target -- rotation disabled since 4 tendons only ever
         # control a 3D position target (matches test_tip_force.py's control
         # loop, which only ever consumes the position rows of the Jacobian).
+        # See IK_GIZMO_ANCHOR's comment for why this is anchor+delta rather
+        # than tracking the tip directly.
         self._ik_gizmo = server.scene.add_transform_controls(
-            "/ik_target", scale=0.05, disable_rotations=True)
+            "/ik_target", scale=IK_GIZMO_SCALE, position=IK_GIZMO_ANCHOR,
+            disable_rotations=True,
+            translation_limits=(
+                (IK_GIZMO_ANCHOR[0] - IK_GIZMO_RANGE, IK_GIZMO_ANCHOR[0] + IK_GIZMO_RANGE),
+                (IK_GIZMO_ANCHOR[1] - IK_GIZMO_RANGE, IK_GIZMO_ANCHOR[1] + IK_GIZMO_RANGE),
+                (IK_GIZMO_ANCHOR[2] - IK_GIZMO_RANGE, IK_GIZMO_ANCHOR[2] + IK_GIZMO_RANGE)))
+        server.scene.add_label(
+            "/ik_target/label", "tip position",
+            position=(0.0, 0.0, IK_GIZMO_SCALE * 1.6), anchor="bottom-center")
 
         @self._ik_gizmo.on_update
         def _(event):
             if event.phase == "start":
-                self._gizmo_dragging = True
+                if self._held_position is None and self._last_solution is not None:
+                    self._held_position = \
+                        self._last_solution.marginals.rod.states[-1].pose.mean[:3, 3].copy()
+                self._ik_offset_prev = np.zeros(3)
             elif event.phase == "update":
-                self._ik_step(np.asarray(event.target.position))
+                offset = np.asarray(event.target.position) - np.asarray(IK_GIZMO_ANCHOR)
+                delta = offset - self._ik_offset_prev
+                self._ik_offset_prev = offset
+                if self._held_position is not None:
+                    self._ik_step(self._held_position + delta)
             elif event.phase == "end":
-                self._gizmo_dragging = False
-                self._reposition_ik_gizmo()
+                self._ik_gizmo.position = IK_GIZMO_ANCHOR
+                self._ik_offset_prev = np.zeros(3)
 
         @self.hold_position_checkbox.on_update
         def _(_):
@@ -251,19 +282,32 @@ class TendonRobotApp:
                     self._last_solution.marginals.rod.states[-1].pose.mean[:3, 3].copy()
             self.solve_and_update()
 
-        self.null_space_slider.on_update(lambda _: self._null_space_step())
+        # Single-axis drag handle (no rotation rings, no plane-drag squares
+        # -- see NULL_SPACE_MIN's comment for why this replaces a slider)
+        # fixed at NULL_SPACE_GIZMO_ANCHOR, off to the side of the robot.
+        # Only the Z arrow is active; dragging it away from anchor[2]==0
+        # gives the "how far" value _null_space_step needs directly, and
+        # letting go (phase=="end") snaps it back to that same anchor.
+        self._null_space_gizmo = server.scene.add_transform_controls(
+            "/null_space_control", scale=NULL_SPACE_GIZMO_SCALE,
+            position=NULL_SPACE_GIZMO_ANCHOR,
+            active_axes=(False, False, True),
+            disable_rotations=True, disable_sliders=True,
+            translation_limits=(
+                (NULL_SPACE_GIZMO_ANCHOR[0], NULL_SPACE_GIZMO_ANCHOR[0]),
+                (NULL_SPACE_GIZMO_ANCHOR[1], NULL_SPACE_GIZMO_ANCHOR[1]),
+                (NULL_SPACE_MIN, NULL_SPACE_MAX)))
+        server.scene.add_label(
+            "/null_space_control/label", "null space",
+            position=(0.0, 0.0, NULL_SPACE_GIZMO_SCALE * 1.6), anchor="bottom-center")
 
-        @reset_null_space.on_click
-        def _(_):
-            # Just re-centers the slider/reference point -- doesn't touch
-            # displacements, since "undo the null-space motion applied so
-            # far" isn't well-defined (the null direction itself has moved).
-            self._suppress_slider_solve = True
-            try:
-                self.null_space_slider.value = 0.0
-            finally:
-                self._suppress_slider_solve = False
-            self._null_space_prev_value = 0.0
+        @self._null_space_gizmo.on_update
+        def _(event):
+            if event.phase == "update":
+                self._null_space_step(event.target.position[2])
+            elif event.phase == "end":
+                self._null_space_gizmo.position = NULL_SPACE_GIZMO_ANCHOR
+                self._null_space_prev_value = 0.0
 
         @reset_wrench.on_click
         def _(_):
@@ -302,15 +346,17 @@ class TendonRobotApp:
             self._null_space_prev_value = 0.0
             self._held_position = None
             self._current_displacement = np.zeros(self.num_tendons)
+            self._null_space_gizmo.position = NULL_SPACE_GIZMO_ANCHOR
+            self._ik_gizmo.position = IK_GIZMO_ANCHOR
+            self._ik_offset_prev = np.zeros(3)
             self._set_sliders(
                 [(s, 0.0) for s in self.force_sliders]
-                + [(self.null_space_slider, 0.0)]
                 + [(self.displacement_sigma_slider, DISPLACEMENT_SIGMA_INITIAL)]
                 + [(self.force_sigma_slider, FORCE_SIGMA_INITIAL)])
 
     def _solve_holding_position(self, tip_wrench, displacement_cov):
         displacement_meas = bendier.VectorXGaussian(self._current_displacement, displacement_cov)
-        solution = self.solver.solve(self.tensions_prior, tip_wrench, None, displacement_meas)
+        solution = self.solver.solve(None, tip_wrench, None, displacement_meas)
 
         if self.hold_position_checkbox.value and self._held_position is not None:
             for _ in range(POSITION_HOLD_MAX_ROUNDS):
@@ -326,7 +372,7 @@ class TendonRobotApp:
                 self._current_displacement = self._current_displacement + dq
 
                 displacement_meas = bendier.VectorXGaussian(self._current_displacement, displacement_cov)
-                solution = self.solver.solve(self.tensions_prior, tip_wrench, None, displacement_meas)
+                solution = self.solver.solve(None, tip_wrench, None, displacement_meas)
 
         return solution
 
@@ -382,13 +428,6 @@ class TendonRobotApp:
             self.tension_plot.data = tuple([x2, *ys2])
 
             self._last_solution = solution
-            if self._ik_gizmo is not None and not self._gizmo_dragging:
-                self._reposition_ik_gizmo()
-
-    def _reposition_ik_gizmo(self):
-        if self._last_solution is None:
-            return
-        self._ik_gizmo.position = self._last_solution.marginals.rod.states[-1].pose.mean[:3, 3]
 
     def _ik_step(self, p_goal):
         with self._solve_lock:
@@ -406,15 +445,11 @@ class TendonRobotApp:
             dq = damped_gauss_newton_step(J_position, p_error, IK_DAMPING)
             self._apply_displacement(self._current_displacement + dq)
 
-    def _null_space_step(self):
-        if self._suppress_slider_solve:
-            return
-
+    def _null_space_step(self, new_value):
         with self._solve_lock:
             if self._last_solution is None:
                 return
 
-            new_value = self.null_space_slider.value
             delta = new_value - self._null_space_prev_value
             self._null_space_prev_value = new_value
             if delta == 0.0:

@@ -13,11 +13,11 @@ using namespace gtsam;
 TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
 :   SolverBase<TendonRobotModel>(config.base)
 {
-    SharedDiagonal strain_noise = get_noise_model_rot_pos(
-        config.sigma_strain_rot, config.sigma_strain_pos);
+    SharedDiagonal constitutive_noise = get_noise_model_rot_pos(
+        config.sigma_constitutive_rot, config.sigma_constitutive_pos);
 
-    small_wrench_noise_ = get_noise_model_rot_pos(
-        config.sigma_small_moment, config.sigma_small_force);
+    equilibrium_wrench_noise_ = get_noise_model_rot_pos(
+        config.sigma_equilibrium_moment, config.sigma_equilibrium_force);
 
     Rot3  base_rot       = Rot3::Rx(-M_PI / 2).compose(Rot3::Rz(M_PI));
     Pose3 base_pose_mean = Pose3(base_rot, Point3::Zero());
@@ -36,8 +36,8 @@ TendonRobotSolver::TendonRobotSolver(const TendonRobotSolverConfig& config)
         config.num_between_nodes,
         config.tendon_input,
         config.K_inv,
-        strain_noise,
-        small_wrench_noise_,
+        constitutive_noise,
+        equilibrium_wrench_noise_,
         displacement_constraint_noise,
         config.tendon_stiffness,
         base_pose_mean,
@@ -67,7 +67,7 @@ Solution<TendonRobotModel::ModelMarginals> TendonRobotSolver::solve(
     int num_nodes = model_->get_num_nodes();
 
     Vector6          tip_wrench_mean  = Vector6::Zero();
-    SharedNoiseModel tip_wrench_noise = small_wrench_noise_;
+    SharedNoiseModel tip_wrench_noise = equilibrium_wrench_noise_;
     if (tip_wrench) {
         tip_wrench_mean  = tip_wrench->mean;
         tip_wrench_noise = noiseModel::Gaussian::Covariance(tip_wrench->cov);

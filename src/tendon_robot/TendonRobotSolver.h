@@ -13,10 +13,10 @@ struct TendonRobotSolverConfig {
         int num_discs,
         int num_between_nodes,
         const gtsam::Matrix6& K_inv,
-        double sigma_strain_rot,
-        double sigma_strain_pos,
-        double sigma_small_force,
-        double sigma_small_moment,
+        double sigma_constitutive_rot,
+        double sigma_constitutive_pos,
+        double sigma_equilibrium_force,
+        double sigma_equilibrium_moment,
         double sigma_base_pose_pos,
         double sigma_base_pose_rot,
         const TendonRoutingInput& tendon_input,
@@ -28,10 +28,10 @@ struct TendonRobotSolverConfig {
         num_discs(num_discs),
         num_between_nodes(num_between_nodes),
         K_inv(K_inv),
-        sigma_strain_rot(sigma_strain_rot),
-        sigma_strain_pos(sigma_strain_pos),
-        sigma_small_force(sigma_small_force),
-        sigma_small_moment(sigma_small_moment),
+        sigma_constitutive_rot(sigma_constitutive_rot),
+        sigma_constitutive_pos(sigma_constitutive_pos),
+        sigma_equilibrium_force(sigma_equilibrium_force),
+        sigma_equilibrium_moment(sigma_equilibrium_moment),
         sigma_base_pose_pos(sigma_base_pose_pos),
         sigma_base_pose_rot(sigma_base_pose_rot),
         sigma_displacement_constraint(sigma_displacement_constraint),
@@ -46,10 +46,10 @@ struct TendonRobotSolverConfig {
     int num_between_nodes;
     gtsam::Matrix6 K_inv;
 
-    double sigma_strain_rot;
-    double sigma_strain_pos;
-    double sigma_small_force;
-    double sigma_small_moment;
+    double sigma_constitutive_rot;
+    double sigma_constitutive_pos;
+    double sigma_equilibrium_force;
+    double sigma_equilibrium_moment;
     double sigma_base_pose_pos;
     double sigma_base_pose_rot;
 
@@ -73,5 +73,5 @@ public:
         const std::optional<VectorXGaussian>& displacement_meas  = std::nullopt);
 
 private:
-    gtsam::SharedDiagonal small_wrench_noise_;
+    gtsam::SharedDiagonal equilibrium_wrench_noise_;
 };

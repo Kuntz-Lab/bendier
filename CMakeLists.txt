@@ -20,11 +20,11 @@ find_package(GTSAM REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 set(BENDIER_SOLVER_SOURCES
-  src/cosserat_rod/BoundaryStressFactor.cpp
   src/cosserat_rod/CosseratRodModel.cpp
   src/cosserat_rod/CosseratRodSolver.cpp
-  src/cosserat_rod/CosseratStrainFactor.cpp
-  src/cosserat_rod/CosseratStressFactor.cpp
+  src/cosserat_rod/CosseratBoundaryEquilibriumFactor.cpp
+  src/cosserat_rod/CosseratConstitutiveFactor.cpp
+  src/cosserat_rod/CosseratEquilibriumFactor.cpp
   src/measurement/ActuationForceMeasFactor.cpp
   src/parallel_robot/ParallelRobotModel.cpp
   src/parallel_robot/ParallelRobotSolver.cpp

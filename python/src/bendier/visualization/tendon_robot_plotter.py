@@ -87,7 +87,7 @@ class TendonRobotPlotter(BasePlotter):
             self.disc_handles = [
                 utils.add_disc(
                     self.server.scene, f"/rod/discs/{i + 1}", pose, radius, half_width,
-                    utils.CORNFLOWER_BLUE, opacity=0.7, radial_segments=DISC_SIDES, material="toon5")
+                    utils.CORNFLOWER_BLUE, radial_segments=DISC_SIDES, material="toon5")
                 for i, pose in enumerate(cylinder_poses)
             ]
         else:

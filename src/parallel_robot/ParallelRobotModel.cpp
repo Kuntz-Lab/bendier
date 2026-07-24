@@ -19,8 +19,8 @@ static_assert(BendierModel<ParallelRobotModel>);
 ParallelRobotModel::ParallelRobotModel(
     int nodes_per_rod,
     Matrix6 K_inv,
-    SharedDiagonal strain_noise,
-    SharedDiagonal stress_noise,
+    SharedDiagonal constitutive_noise,
+    SharedDiagonal equilibrium_noise,
     std::vector<Matrix4> base_end_poses,
     std::vector<Matrix4> tip_end_poses,
     double sigma_end_pose_pos,
@@ -29,7 +29,7 @@ ParallelRobotModel::ParallelRobotModel(
 :
     base_end_poses_(std::move(base_end_poses)),
     tip_end_poses_(std::move(tip_end_poses)),
-    small_wrench_noise_(stress_noise),
+    equilibrium_wrench_noise_(equilibrium_noise),
     id_(next_id_++),
     sigma_end_pose_pos_(sigma_end_pose_pos),
     sigma_end_pose_rot_(sigma_end_pose_rot),
@@ -47,8 +47,8 @@ ParallelRobotModel::ParallelRobotModel(
         rods_.push_back(std::make_unique<CosseratRodModel>(CosseratRodModelConfig{
             .num_nodes = nodes_per_rod,
             .K_inv = K_inv,
-            .strain_noise = strain_noise,
-            .stress_noise = stress_noise,
+            .constitutive_noise = constitutive_noise,
+            .equilibrium_noise = equilibrium_noise,
             .wrench_node_indices = {0, nodes_per_rod - 1},
         }));
     }
@@ -83,9 +83,9 @@ NonlinearFactorGraph ParallelRobotModel::build_graph() const
         sigma_end_pose_pos_, sigma_end_pose_pos_, sigma_rod_lengths_,
         1.0e-4).finished());
 
-    KeyVector tip_stress_keys;
+    KeyVector tip_wrench_keys;
     KeyVector tip_pose_keys;
-    tip_stress_keys.reserve(rods_.size());
+    tip_wrench_keys.reserve(rods_.size());
     tip_pose_keys.reserve(rods_.size());
 
     for (size_t i = 0; i < rods_.size(); i++) {
@@ -105,17 +105,18 @@ NonlinearFactorGraph ParallelRobotModel::build_graph() const
             Pose3(tip_end_poses_[i]),
             tip_pose_noise));
 
-        tip_stress_keys.push_back(rods_[i]->get_stress_key(-1));
+        // The rod tip wrenches and their poses
+        tip_wrench_keys.push_back(rods_[i]->get_wrench_key(-1));
         tip_pose_keys.push_back(rods_[i]->get_pose_key(-1));
     }
 
-    // Sum of all transformed tip stresses equals the platform wrench
+    // Sum of all transformed tip wrenches equals the platform wrench
     graph.add(PlatformWrenchBalanceFactor(
-        tip_stress_keys,
+        tip_wrench_keys,
         tip_pose_keys,
         platform_wrench_key(),
         platform_pose_key(),
-        small_wrench_noise_));
+        equilibrium_wrench_noise_));
 
     return graph;
 }
@@ -160,13 +161,8 @@ ParallelRobotMarginals ParallelRobotModel::get_marginals(
 }
 
 // NOTE: this proxies "rod length" with the base pose's own z-translation
-// (see sigma_QQ/sigma_TQ below), which models a longer commanded rod
-// length as the base sliding further away along its own axis rather than
-// the rod itself becoming physically longer. A physically longer rod is
-// more compliant (it bends more under the same load/stiffness), which
-// this proxy does not capture, so this Jacobian is measurably (~1%, more
-// under load) off from the true finite-difference sensitivity of platform
-// pose to commanded rod length. See RobotJacobianTests.cpp.
+// This isn't perfect, since as the rod lengthens, it bends more etc.
+// But it works relatively well for the simulation
 Matrix ParallelRobotModel::get_rod_lengths_jacobian(const Marginals& marginals) const {
     const int num_rods = static_cast<int>(rods_.size());
 

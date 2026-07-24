@@ -22,8 +22,8 @@ TendonRobotModel::TendonRobotModel(
     int num_between_nodes,
     TendonRoutingInput tendon_input,
     const Matrix6& K_inv,
-    SharedDiagonal strain_noise,
-    SharedDiagonal stress_noise,
+    SharedDiagonal constitutive_noise,
+    SharedDiagonal equilibrium_noise,
     SharedDiagonal displacement_constraint_noise,
     double tendon_stiffness,
     Pose3 base_pose_mean,
@@ -34,7 +34,7 @@ TendonRobotModel::TendonRobotModel(
     num_discs_(num_discs),
     num_nodes_(TendonRobotNumNodes(num_discs, num_between_nodes)),
     num_tendons_(static_cast<int>(tendon_input.params.size())),
-    stress_noise_(stress_noise),
+    equilibrium_noise_(equilibrium_noise),
     displacement_constraint_noise_(displacement_constraint_noise),
     base_pose_mean_(base_pose_mean),
     base_pose_noise_(base_pose_noise),
@@ -62,8 +62,8 @@ TendonRobotModel::TendonRobotModel(
     rod_ = std::make_unique<CosseratRodModel>(CosseratRodModelConfig{
         .num_nodes = num_nodes_,
         .K_inv = K_inv,
-        .strain_noise = strain_noise,
-        .stress_noise = stress_noise,
+        .constitutive_noise = constitutive_noise,
+        .equilibrium_noise = equilibrium_noise,
         .rod_length = rod_length_,
         .wrench_node_indices = rod_wrench_node_indices,
     });
@@ -229,7 +229,7 @@ NonlinearFactorGraph TendonRobotModel::build_graph() const
             holes_prev,
             holes,
             holes_next,
-            stress_noise_));
+            equilibrium_noise_));
     }
 
     // Factor that constrains the total tendon length given a displacement prior

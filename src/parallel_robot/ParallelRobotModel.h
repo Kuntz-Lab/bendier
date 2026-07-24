@@ -24,8 +24,8 @@ public:
     ParallelRobotModel(
         int nodes_per_rod,
         gtsam::Matrix6 K_inv,
-        gtsam::SharedDiagonal strain_noise,
-        gtsam::SharedDiagonal stress_noise,
+        gtsam::SharedDiagonal constitutive_noise,
+        gtsam::SharedDiagonal equilibrium_noise,
         std::vector<gtsam::Matrix4> base_end_poses,
         std::vector<gtsam::Matrix4> tip_end_poses,
         double sigma_end_pose_pos,
@@ -60,7 +60,7 @@ private:
     std::vector<std::unique_ptr<CosseratRodModel>> rods_;
     const std::vector<gtsam::Matrix4> base_end_poses_;
     const std::vector<gtsam::Matrix4> tip_end_poses_;
-    const gtsam::SharedDiagonal small_wrench_noise_;
+    const gtsam::SharedDiagonal equilibrium_wrench_noise_;
 
     const int id_;
     inline static int next_id_ = 0;

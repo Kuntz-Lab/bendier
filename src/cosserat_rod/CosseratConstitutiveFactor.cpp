@@ -1,11 +1,11 @@
-#include "CosseratStrainFactor.h"
+#include "CosseratConstitutiveFactor.h"
 #include "utils/WrenchTransforms.h"
 #include <gtsam/base/Matrix.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
 
 using namespace gtsam;
 
-CosseratStrainFactor::CosseratStrainFactor(
+CosseratConstitutiveFactor::CosseratConstitutiveFactor(
     Key pose_0_key,
     Key pose_1_key,
     Key stress_0_key,
@@ -16,7 +16,7 @@ CosseratStrainFactor::CosseratStrainFactor(
     const SharedNoiseModel& model,
     int num_magnus_terms)
 :
-    CosseratStrainBase(model, pose_0_key, pose_1_key, stress_0_key, stress_1_key),
+    CosseratConstitutiveBase(model, pose_0_key, pose_1_key, stress_0_key, stress_1_key),
     ds_(ds),
     nominal_strain_(nominal_strain),
     num_magnus_terms_(num_magnus_terms),
@@ -93,7 +93,7 @@ static Vector6 get_strain_magnus(
     return strain;
 }
 
-Vector CosseratStrainFactor::evaluateError(
+Vector CosseratConstitutiveFactor::evaluateError(
     const Pose3& p0, 
     const Pose3& p1, 
     const Vector6& s0, 

@@ -6,7 +6,7 @@
 class PlatformWrenchBalanceFactor: public gtsam::NoiseModelFactor {
 public:
     PlatformWrenchBalanceFactor(
-        const gtsam::KeyVector& stress_keys,
+        const gtsam::KeyVector& tip_wrench_keys,
         const gtsam::KeyVector& pose_keys,
         gtsam::Key platform_wrench_key,
         gtsam::Key platform_pose_key,

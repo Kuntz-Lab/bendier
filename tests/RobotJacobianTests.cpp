@@ -61,8 +61,8 @@ TendonRobotSolverConfig BuildTendonConfig() {
   return TendonRobotSolverConfig(
       /*rod_length=*/0.25, /*num_discs=*/9, /*num_between_nodes=*/3,
       TendonRodKInv(),
-      /*sigma_strain_rot=*/0.1, /*sigma_strain_pos=*/0.01,
-      /*sigma_small_force=*/1.0e-4, /*sigma_small_moment=*/1.0e-5,
+      /*sigma_constitutive_rot=*/0.1, /*sigma_constitutive_pos=*/0.01,
+      /*sigma_equilibrium_force=*/1.0e-4, /*sigma_equilibrium_moment=*/1.0e-5,
       /*sigma_base_pose_pos=*/1.0e-4, /*sigma_base_pose_rot=*/1.0e-3,
       TendonInput());
 }
@@ -404,8 +404,8 @@ ParallelRobotSolverConfig BuildParallelConfig() {
   return ParallelRobotSolverConfig(
       /*nodes_per_rod=*/15,
       ParallelRodKInv(),
-      /*sigma_strain_rot=*/0.025, /*sigma_strain_pos=*/0.0025,
-      /*sigma_small_force=*/1.0e-3, /*sigma_small_moment=*/1.0e-3,
+      /*sigma_constitutive_rot=*/0.025, /*sigma_constitutive_pos=*/0.0025,
+      /*sigma_equilibrium_force=*/1.0e-3, /*sigma_equilibrium_moment=*/1.0e-3,
       ParallelBasePoses(), ParallelTipPoses(),
       /*sigma_end_pose_pos=*/1.0e-4, /*sigma_end_pose_rot=*/1.0e-3);
 }

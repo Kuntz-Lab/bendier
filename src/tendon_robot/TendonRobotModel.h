@@ -56,8 +56,8 @@ public:
         int num_between_nodes,
         TendonRoutingInput tendon_input,
         const gtsam::Matrix6& K_inv,
-        gtsam::SharedDiagonal strain_noise,
-        gtsam::SharedDiagonal stress_noise,
+        gtsam::SharedDiagonal constitutive_noise,
+        gtsam::SharedDiagonal equilibrium_noise,
         gtsam::SharedDiagonal displacement_constraint_noise,
         double tendon_stiffness,
         gtsam::Pose3 base_pose_mean,
@@ -104,7 +104,7 @@ private:
     const int num_nodes_;
     const int num_tendons_;
 
-    gtsam::SharedDiagonal stress_noise_;
+    gtsam::SharedDiagonal equilibrium_noise_;
     gtsam::SharedDiagonal displacement_constraint_noise_;
 
     gtsam::Pose3 base_pose_mean_;

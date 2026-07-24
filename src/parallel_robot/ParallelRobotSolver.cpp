@@ -12,17 +12,17 @@ using namespace gtsam;
 ParallelRobotSolver::ParallelRobotSolver(const ParallelRobotSolverConfig& config)
 :   SolverBase<ParallelRobotModel>(config.base)
 {
-    SharedDiagonal strain_noise = get_noise_model_rot_pos(
-        config.sigma_strain_rot, config.sigma_strain_pos);
+    SharedDiagonal constitutive_noise = get_noise_model_rot_pos(
+        config.sigma_constitutive_rot, config.sigma_constitutive_pos);
 
-    SharedDiagonal small_wrench_noise = get_noise_model_rot_pos(
-        config.sigma_small_moment, config.sigma_small_force);
+    SharedDiagonal equilibrium_wrench_noise = get_noise_model_rot_pos(
+        config.sigma_equilibrium_moment, config.sigma_equilibrium_force);
 
     model_ = std::make_unique<ParallelRobotModel>(
         config.nodes_per_rod,
         config.K_inv,
-        strain_noise,
-        small_wrench_noise,
+        constitutive_noise,
+        equilibrium_wrench_noise,
         config.base_end_poses,
         config.tip_end_poses,
         config.sigma_end_pose_pos,

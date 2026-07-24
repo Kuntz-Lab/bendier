@@ -5,10 +5,10 @@
 #include <gtsam/linear/NoiseModel.h>
 #include <gtsam/nonlinear/factorTesting.h>
 
-#include "cosserat_rod/BoundaryStressFactor.h"
 #include "cosserat_rod/CosseratRodModel.h"
-#include "cosserat_rod/CosseratStrainFactor.h"
-#include "cosserat_rod/CosseratStressFactor.h"
+#include "cosserat_rod/CosseratBoundaryEquilibriumFactor.h"
+#include "cosserat_rod/CosseratConstitutiveFactor.h"
+#include "cosserat_rod/CosseratEquilibriumFactor.h"
 #include "measurement/ActuationForceMeasFactor.h"
 #include "parallel_robot/PlatformWrenchBalanceFactor.h"
 #include "parallel_robot/SingleRodBaseFactor.h"
@@ -124,7 +124,7 @@ TEST(WrenchTransforms, body_to_spatial_wrench_jacobians) {
   EXPECT(assert_equal(numH_pose, H_pose, 1e-6));
 }
 
-TEST(CosseratStrainFactor, jacobians_all_magnus_terms) {
+TEST(CosseratConstitutiveFactor, jacobians_all_magnus_terms) {
   Key p0k = 1, p1k = 2, s0k = 3, s1k = 4;
 
   Values values;
@@ -136,7 +136,7 @@ TEST(CosseratStrainFactor, jacobians_all_magnus_terms) {
   // Test all Magnus series term counts from 1 to 4
   for (double ds : {0.001, 0.01, 0.1}) {
     for (int num_magnus_terms = 1; num_magnus_terms <= 4; ++num_magnus_terms) {
-      CosseratStrainFactor factor(
+      CosseratConstitutiveFactor factor(
           p0k, p1k, s0k, s1k,
           ds, StraightRodNominalStrain(), K_inv_1(),
           noiseModel::Unit::Create(6), num_magnus_terms);
@@ -146,9 +146,9 @@ TEST(CosseratStrainFactor, jacobians_all_magnus_terms) {
   }
 }
 
-TEST(CosseratStressFactor, jacobians_interior) {
+TEST(CosseratEquilibriumFactor, jacobians_interior) {
   Key p0k = 1, p1k = 2, s0k = 3, s1k = 4, wk = 5;
-  CosseratStressFactor factor(p0k, p1k, s0k, s1k, wk, noiseModel::Unit::Create(6));
+  CosseratEquilibriumFactor factor(p0k, p1k, s0k, s1k, wk, noiseModel::Unit::Create(6));
 
   Values values;
   values.insert(p0k, pose_a());
@@ -160,9 +160,9 @@ TEST(CosseratStressFactor, jacobians_interior) {
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
 }
 
-TEST(CosseratStressFactor, jacobians_tip) {
+TEST(CosseratEquilibriumFactor, jacobians_interior_no_wrench) {
   Key p0k = 1, p1k = 2, s0k = 3, s1k = 4;
-  CosseratStressFactor factor(p0k, p1k, s0k, s1k, noiseModel::Unit::Create(6));
+  CosseratEquilibriumFactor factor(p0k, p1k, s0k, s1k, std::nullopt, noiseModel::Unit::Create(6));
 
   Values values;
   values.insert(p0k, pose_a());
@@ -173,18 +173,30 @@ TEST(CosseratStressFactor, jacobians_tip) {
   EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
 }
 
-TEST(BoundaryStressFactor, jacobians_tip_and_base) {
+TEST(CosseratBoundaryEquilibriumFactor, jacobians_tip_and_base) {
   Key sk = 1, wk = 2;
 
   Values values;
   values.insert(sk, wrench_1());
   values.insert(wk, wrench_2());
 
-  BoundaryStressFactor tip_factor(sk, wk, noiseModel::Unit::Create(6), /*is_base=*/false);
+  CosseratBoundaryEquilibriumFactor tip_factor(
+      sk, wk, noiseModel::Unit::Create(6), /*is_base=*/false);
   EXPECT_CORRECT_FACTOR_JACOBIANS(tip_factor, values, 1e-6, 1e-5);
 
-  BoundaryStressFactor base_factor(sk, wk, noiseModel::Unit::Create(6), /*is_base=*/true);
+  CosseratBoundaryEquilibriumFactor base_factor(
+      sk, wk, noiseModel::Unit::Create(6), /*is_base=*/true);
   EXPECT_CORRECT_FACTOR_JACOBIANS(base_factor, values, 1e-6, 1e-5);
+}
+
+TEST(CosseratBoundaryEquilibriumFactor, jacobians_free_end) {
+  Key sk = 1;
+
+  Values values;
+  values.insert(sk, wrench_1());
+
+  CosseratBoundaryEquilibriumFactor factor(sk, std::nullopt, noiseModel::Unit::Create(6));
+  EXPECT_CORRECT_FACTOR_JACOBIANS(factor, values, 1e-6, 1e-5);
 }
 
 TEST(SingleRodBaseFactor, jacobians) {
@@ -691,8 +703,8 @@ TEST(TendonRobotModel, disc_geometry_matches_hand_computed) {
   TendonRobotSolverConfig config(
       rod_length, num_discs, num_between_nodes,
       K_inv_1(),
-      /*sigma_strain_rot=*/0.1, /*sigma_strain_pos=*/0.01,
-      /*sigma_small_force=*/1e-4, /*sigma_small_moment=*/1e-5,
+      /*sigma_constitutive_rot=*/0.1, /*sigma_constitutive_pos=*/0.01,
+      /*sigma_equilibrium_force=*/1e-4, /*sigma_equilibrium_moment=*/1e-5,
       /*sigma_base_pose_pos=*/1e-4, /*sigma_base_pose_rot=*/1e-3,
       routing);
 
@@ -738,8 +750,8 @@ TEST(TendonRobotModel, zero_tension_straight_rod_gives_near_zero_displacement) {
   TendonRobotSolverConfig config(
       /*rod_length=*/0.24, /*num_discs=*/3, /*num_between_nodes=*/1,
       K_inv_1(),
-      /*sigma_strain_rot=*/0.1, /*sigma_strain_pos=*/0.01,
-      /*sigma_small_force=*/1e-6, /*sigma_small_moment=*/1e-7,
+      /*sigma_constitutive_rot=*/0.1, /*sigma_constitutive_pos=*/0.01,
+      /*sigma_equilibrium_force=*/1e-6, /*sigma_equilibrium_moment=*/1e-7,
       /*sigma_base_pose_pos=*/1e-6, /*sigma_base_pose_rot=*/1e-6,
       routing);
 

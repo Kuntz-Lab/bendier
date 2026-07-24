@@ -38,8 +38,8 @@ inline std::vector<int> AllRodNodes(int num_nodes) {
 struct CosseratRodModelConfig {
     int num_nodes;
     gtsam::Matrix6 K_inv;
-    gtsam::SharedDiagonal strain_noise;
-    gtsam::SharedDiagonal stress_noise;
+    gtsam::SharedDiagonal constitutive_noise;
+    gtsam::SharedDiagonal equilibrium_noise;
     int num_magnus_terms = 4;
     double rod_length = 0.0;
     gtsam::Vector6 nominal_strain = StraightRodNominalStrain();
@@ -85,8 +85,8 @@ private:
     std::vector<gtsam::Matrix6> K_inv_;
     const int num_magnus_terms_;
 
-    gtsam::SharedDiagonal strain_noise_;
-    gtsam::SharedDiagonal stress_noise_;
+    gtsam::SharedDiagonal constitutive_noise_;
+    gtsam::SharedDiagonal equilibrium_noise_;
 
     double rod_length_;
     gtsam::Vector6 nominal_strain_;
