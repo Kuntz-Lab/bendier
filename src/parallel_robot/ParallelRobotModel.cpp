@@ -159,6 +159,14 @@ ParallelRobotMarginals ParallelRobotModel::get_marginals(
     return solution;
 }
 
+// NOTE: this proxies "rod length" with the base pose's own z-translation
+// (see sigma_QQ/sigma_TQ below), which models a longer commanded rod
+// length as the base sliding further away along its own axis rather than
+// the rod itself becoming physically longer. A physically longer rod is
+// more compliant (it bends more under the same load/stiffness), which
+// this proxy does not capture, so this Jacobian is measurably (~1%, more
+// under load) off from the true finite-difference sensitivity of platform
+// pose to commanded rod length. See RobotJacobianTests.cpp.
 Matrix ParallelRobotModel::get_rod_lengths_jacobian(const Marginals& marginals) const {
     const int num_rods = static_cast<int>(rods_.size());
 
